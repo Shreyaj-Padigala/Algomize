@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Algomize - AI Crypto Trading Bot</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <h1>Algomize</h1>
+      <span class="subtitle">AI Agent-Based Crypto Trading Bot</span>
+      <div class="connection-status" id="connectionStatus">
+        <span class="dot disconnected"></span>
+        <span id="statusText">Disconnected</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Top Bar: Price + Session -->
+    <section class="top-bar">
+      <div class="price-display">
+        <span class="label">BTC/USDT</span>
+        <span class="price" id="currentPrice">--</span>
+        <span class="change" id="priceChange">--</span>
+      </div>
+      <div class="session-controls">
+        <span class="session-status" id="sessionStatus">No Active Session</span>
+        <button id="btnStartSession" class="btn btn-success" disabled>Start Session</button>
+        <button id="btnStopSession" class="btn btn-danger" disabled>Stop Session</button>
+      </div>
+    </section>
+
+    <div class="grid-layout">
+      <!-- Strategy Panel -->
+      <section class="panel" id="strategyPanel">
+        <h2>Strategies</h2>
+        <div class="strategy-form">
+          <input type="text" id="strategyName" placeholder="Strategy name">
+          <input type="number" id="strategyLeverage" placeholder="Leverage" value="1" min="1" max="100">
+          <button id="btnCreateStrategy" class="btn btn-primary">Create</button>
+        </div>
+        <div id="strategyList" class="strategy-list"></div>
+      </section>
+
+      <!-- Agent Panel -->
+      <section class="panel" id="agentPanel">
+        <h2>Agents</h2>
+        <div id="agentList" class="agent-list"></div>
+      </section>
+
+      <!-- Performance Panel -->
+      <section class="panel" id="performancePanel">
+        <h2>Performance</h2>
+        <div class="stats-grid">
+          <div class="stat">
+            <span class="stat-label">Session PnL</span>
+            <span class="stat-value" id="sessionPnl">$0.00</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Lifetime PnL</span>
+            <span class="stat-value" id="lifetimePnl">$0.00</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Win Rate</span>
+            <span class="stat-value" id="winRate">0%</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Total Trades</span>
+            <span class="stat-value" id="tradeCount">0</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Exchange Connection -->
+      <section class="panel" id="exchangePanel">
+        <h2>Exchange Connection</h2>
+        <div class="exchange-form">
+          <input type="text" id="apiKey" placeholder="BloFin API Key">
+          <input type="password" id="apiSecret" placeholder="BloFin API Secret">
+          <input type="password" id="passphrase" placeholder="Passphrase">
+          <button id="btnConnect" class="btn btn-primary">Connect</button>
+          <button id="btnDisconnect" class="btn btn-danger">Disconnect</button>
+        </div>
+        <div id="exchangeStatus" class="exchange-status"></div>
+      </section>
+
+      <!-- Recent Trades -->
+      <section class="panel wide" id="tradesPanel">
+        <h2>Recent Trades</h2>
+        <table class="trades-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Side</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Size</th>
+              <th>PnL</th>
+              <th>Result</th>
+              <th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="tradesBody"></tbody>
+        </table>
+      </section>
+
+      <!-- Agent Outputs -->
+      <section class="panel wide" id="agentOutputPanel">
+        <h2>Agent Outputs</h2>
+        <div class="agent-outputs" id="agentOutputs"></div>
+      </section>
+    </div>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
