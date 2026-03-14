@@ -1,5 +1,5 @@
 const indicatorService = require('../services/indicatorService');
-const geminiService = require('../services/geminiService');
+const groqService = require('../services/groqService');
 
 class MicroTrendAgent {
   constructor() {
@@ -22,7 +22,7 @@ class MicroTrendAgent {
       emaTrend = currentEma20 > currentEma50 ? 'bullish' : 'bearish';
     }
 
-    const aiContext = await geminiService.analyze(
+    const aiContext = await groqService.analyze(
       `Interpret 15-minute trend for BTC/USDT.
        Structure trend: ${structure.trend}
        Recent structures: ${JSON.stringify(structure.structures.slice(-4))}

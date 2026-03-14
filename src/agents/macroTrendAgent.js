@@ -1,5 +1,5 @@
 const indicatorService = require('../services/indicatorService');
-const geminiService = require('../services/geminiService');
+const groqService = require('../services/groqService');
 
 class MacroTrendAgent {
   constructor() {
@@ -32,7 +32,7 @@ class MacroTrendAgent {
       macroTrend = directionalBias;
     }
 
-    const aiContext = await geminiService.analyze(
+    const aiContext = await groqService.analyze(
       `Interpret 1-hour macro trend for BTC/USDT.
        Structure: ${structure.trend}, Directional bias: ${directionalBias}
        Combined macro trend: ${macroTrend}

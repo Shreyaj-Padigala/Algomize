@@ -1,5 +1,5 @@
 const indicatorService = require('../services/indicatorService');
-const geminiService = require('../services/geminiService');
+const groqService = require('../services/groqService');
 
 class ConfluenceAgent {
   constructor() {
@@ -24,7 +24,7 @@ class ConfluenceAgent {
     const reactions = this._findPriorReactions(candles15m, allLevels);
 
     // Use Gemini for contextual interpretation only
-    const aiContext = await geminiService.analyze(
+    const aiContext = await groqService.analyze(
       `Interpret these support/resistance levels for BTC/USDT trading context.
        Current price: ${currentPrice}
        Support levels: ${JSON.stringify(levels15m.filter(l => l.type === 'support').slice(0, 3))}

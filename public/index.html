@@ -3,115 +3,175 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Algomize - AI Crypto Trading Bot</title>
+  <title>Algomize</title>
   <link rel="stylesheet" href="/css/styles.css">
 </head>
 <body>
+  <!-- Header -->
   <header>
     <div class="header-content">
-      <h1>Algomize</h1>
-      <span class="subtitle">AI Agent-Based Crypto Trading Bot</span>
-      <div class="connection-status" id="connectionStatus">
-        <span class="dot disconnected"></span>
-        <span id="statusText">Disconnected</span>
+      <div class="header-left">
+        <span class="logo">&gt;_</span>
+        <h1>Algomize</h1>
+      </div>
+      <div class="header-center">
+        <span class="price-tag">BTC/USDT</span>
+        <span class="price-value" id="currentPrice">--</span>
+        <span class="price-source">via BloFin</span>
+      </div>
+      <div class="header-right">
+        <div class="connection-dot" id="connectionDot"></div>
+        <span id="statusText" class="status-text">Disconnected</span>
       </div>
     </div>
   </header>
 
   <main>
-    <!-- Top Bar: Price + Session -->
-    <section class="top-bar">
-      <div class="price-display">
-        <span class="label">BTC/USDT</span>
-        <span class="price" id="currentPrice">--</span>
-        <span class="change" id="priceChange">--</span>
+    <div class="layout">
+      <!-- Left Sidebar -->
+      <aside class="sidebar">
+        <!-- Strategy Section -->
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span class="section-icon">$</span>
+            <span>Strategy</span>
+          </div>
+          <div class="strategy-create">
+            <input type="text" id="strategyName" placeholder="Strategy name..." class="input-field">
+            <button id="btnCreateStrategy" class="btn-action">Create</button>
+          </div>
+          <div id="strategyList" class="strategy-list"></div>
+        </div>
+
+        <!-- Bot Controls -->
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span class="section-icon">~</span>
+            <span>Bot Control</span>
+          </div>
+          <div class="bot-status" id="botStatus">
+            <span class="bot-indicator inactive"></span>
+            <span id="sessionStatus">Inactive</span>
+          </div>
+          <div class="bot-buttons">
+            <button id="btnStartSession" class="btn-start" disabled>Start Bot</button>
+            <button id="btnStopSession" class="btn-stop" disabled>Terminate</button>
+          </div>
+          <div class="loss-tracker" id="lossTracker">
+            <span class="loss-label">Loss Streak:</span>
+            <span class="loss-dots">
+              <span class="loss-dot" id="loss1"></span>
+              <span class="loss-dot" id="loss2"></span>
+              <span class="loss-dot" id="loss3"></span>
+            </span>
+          </div>
+        </div>
+
+        <!-- Performance -->
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span class="section-icon">#</span>
+            <span>Performance</span>
+          </div>
+          <div class="perf-grid">
+            <div class="perf-item">
+              <span class="perf-label">Session PnL</span>
+              <span class="perf-value" id="sessionPnl">$0.00</span>
+            </div>
+            <div class="perf-item">
+              <span class="perf-label">Lifetime PnL</span>
+              <span class="perf-value" id="lifetimePnl">$0.00</span>
+            </div>
+            <div class="perf-item">
+              <span class="perf-label">Win Rate</span>
+              <span class="perf-value" id="winRate">0%</span>
+            </div>
+            <div class="perf-item">
+              <span class="perf-label">Trades</span>
+              <span class="perf-value" id="tradeCount">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Exchange Status -->
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span class="section-icon">@</span>
+            <span>Exchange</span>
+          </div>
+          <div id="exchangeStatus" class="exchange-info">
+            <span class="exchange-badge">BloFin</span>
+            <span class="exchange-state" id="exchangeState">Checking...</span>
+          </div>
+        </div>
+
+        <!-- Agents -->
+        <div class="sidebar-section">
+          <div class="section-header">
+            <span class="section-icon">%</span>
+            <span>Agents</span>
+          </div>
+          <div id="agentList" class="agent-list"></div>
+        </div>
+      </aside>
+
+      <!-- Main Content -->
+      <div class="main-content">
+        <!-- Workflow Feed -->
+        <div class="workflow-panel">
+          <div class="panel-header">
+            <span class="panel-title">&gt; Workflow</span>
+            <span class="panel-badge" id="workflowCount">0 events</span>
+          </div>
+          <div class="workflow-feed" id="workflowFeed">
+            <div class="workflow-empty">
+              <span class="empty-prompt">&gt;</span> Start a bot to see the agent workflow here...
+            </div>
+          </div>
+        </div>
+
+        <!-- Signal Prompt Modal -->
+        <div class="signal-prompt" id="signalPrompt" style="display: none;">
+          <div class="signal-header">ENTRY SIGNAL DETECTED</div>
+          <div class="signal-body">
+            <div class="signal-detail">
+              <span class="signal-side" id="signalSide">--</span>
+              <span class="signal-price">at <span id="signalPrice">--</span></span>
+            </div>
+            <div class="signal-confidence">
+              Confidence: <span id="signalConfidence">--</span>
+            </div>
+            <div class="signal-question">Do you want to place this trade for 100X Leverage?</div>
+            <div class="signal-actions">
+              <button class="btn-yes" id="btnAcceptSignal">Yes, Enter Trade</button>
+              <button class="btn-no" id="btnRejectSignal">No, Skip</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Recent Trades -->
+        <div class="trades-panel">
+          <div class="panel-header">
+            <span class="panel-title"># Trade Log</span>
+          </div>
+          <div class="trades-scroll">
+            <table class="trades-table">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Side</th>
+                  <th>Entry</th>
+                  <th>Exit</th>
+                  <th>PnL</th>
+                  <th>Result</th>
+                  <th>Time</th>
+                </tr>
+              </thead>
+              <tbody id="tradesBody"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
-      <div class="session-controls">
-        <span class="session-status" id="sessionStatus">No Active Session</span>
-        <button id="btnStartSession" class="btn btn-success" disabled>Start Session</button>
-        <button id="btnStopSession" class="btn btn-danger" disabled>Stop Session</button>
-      </div>
-    </section>
-
-    <div class="grid-layout">
-      <!-- Strategy Panel -->
-      <section class="panel" id="strategyPanel">
-        <h2>Strategies</h2>
-        <div class="strategy-form">
-          <input type="text" id="strategyName" placeholder="Strategy name">
-          <input type="number" id="strategyLeverage" placeholder="Leverage" value="1" min="1" max="100">
-          <button id="btnCreateStrategy" class="btn btn-primary">Create</button>
-        </div>
-        <div id="strategyList" class="strategy-list"></div>
-      </section>
-
-      <!-- Agent Panel -->
-      <section class="panel" id="agentPanel">
-        <h2>Agents</h2>
-        <div id="agentList" class="agent-list"></div>
-      </section>
-
-      <!-- Performance Panel -->
-      <section class="panel" id="performancePanel">
-        <h2>Performance</h2>
-        <div class="stats-grid">
-          <div class="stat">
-            <span class="stat-label">Session PnL</span>
-            <span class="stat-value" id="sessionPnl">$0.00</span>
-          </div>
-          <div class="stat">
-            <span class="stat-label">Lifetime PnL</span>
-            <span class="stat-value" id="lifetimePnl">$0.00</span>
-          </div>
-          <div class="stat">
-            <span class="stat-label">Win Rate</span>
-            <span class="stat-value" id="winRate">0%</span>
-          </div>
-          <div class="stat">
-            <span class="stat-label">Total Trades</span>
-            <span class="stat-value" id="tradeCount">0</span>
-          </div>
-        </div>
-      </section>
-
-      <!-- Exchange Connection -->
-      <section class="panel" id="exchangePanel">
-        <h2>Exchange Connection</h2>
-        <div class="exchange-form">
-          <input type="text" id="apiKey" placeholder="BloFin API Key">
-          <input type="password" id="apiSecret" placeholder="BloFin API Secret">
-          <input type="password" id="passphrase" placeholder="Passphrase">
-          <button id="btnConnect" class="btn btn-primary">Connect</button>
-          <button id="btnDisconnect" class="btn btn-danger">Disconnect</button>
-        </div>
-        <div id="exchangeStatus" class="exchange-status"></div>
-      </section>
-
-      <!-- Recent Trades -->
-      <section class="panel wide" id="tradesPanel">
-        <h2>Recent Trades</h2>
-        <table class="trades-table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Side</th>
-              <th>Entry</th>
-              <th>Exit</th>
-              <th>Size</th>
-              <th>PnL</th>
-              <th>Result</th>
-              <th>Time</th>
-            </tr>
-          </thead>
-          <tbody id="tradesBody"></tbody>
-        </table>
-      </section>
-
-      <!-- Agent Outputs -->
-      <section class="panel wide" id="agentOutputPanel">
-        <h2>Agent Outputs</h2>
-        <div class="agent-outputs" id="agentOutputs"></div>
-      </section>
     </div>
   </main>
 

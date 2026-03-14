@@ -20,8 +20,8 @@ module.exports = {
     wsUrl: process.env.BLOFIN_WS_URL || 'wss://openapi.blofin.com/ws/public',
   },
 
-  gemini: {
-    apiKey: process.env.GEMINI_API_KEY || '',
+  groq: {
+    apiKey: process.env.GROQ_API_KEY || '',
   },
 
   trading: {

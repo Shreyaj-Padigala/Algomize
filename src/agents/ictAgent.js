@@ -1,5 +1,5 @@
 const indicatorService = require('../services/indicatorService');
-const geminiService = require('../services/geminiService');
+const groqService = require('../services/groqService');
 
 class ICTAgent {
   constructor() {
@@ -30,7 +30,7 @@ class ICTAgent {
     const currentPrice = candles15m[candles15m.length - 1].close;
 
     // Gemini for contextual ICT interpretation only
-    const aiContext = await geminiService.analyze(
+    const aiContext = await groqService.analyze(
       `Interpret ICT concepts for BTC/USDT:
        FVGs (15m): ${fvgs15m.length} found, recent: ${JSON.stringify(fvgs15m.slice(-3))}
        Liquidity sweeps: ${JSON.stringify(sweeps)}

@@ -1,15 +1,12 @@
-const geminiService = require('../services/geminiService');
-const config = require('../config');
+const groqService = require('../services/groqService');
 
 class FinalDecisionAgent {
   constructor() {
     this.name = 'finalDecision';
     this.lastOutput = null;
-    this.maxPortfolioPercent = config.trading.maxPortfolioPercent;
   }
 
-  async analyze({ confluence, microTrend, macroTrend, rsi, ict, strategyRules, portfolioBalance }) {
-    // Score-based decision system
+  async analyze({ confluence, microTrend, macroTrend, rsi, ict, strategyRules }) {
     let bullishScore = 0;
     let bearishScore = 0;
 
@@ -49,7 +46,6 @@ class FinalDecisionAgent {
       }
     }
 
-    // Determine decision
     const threshold = 5;
     let decision = 'no_trade';
     let side = null;
@@ -65,17 +61,10 @@ class FinalDecisionAgent {
       confidence = Math.min(bearishScore / 12, 1);
     }
 
-    // Position sizing: max 50% of portfolio
-    let positionSize = 0;
-    if (decision !== 'no_trade' && portfolioBalance > 0) {
-      const maxAmount = portfolioBalance * (this.maxPortfolioPercent / 100);
-      positionSize = maxAmount * confidence;
-    }
-
     // AI interpretation of strategy rules
     let aiContext = null;
     if (strategyRules && Object.keys(strategyRules).length > 0) {
-      aiContext = await geminiService.analyze(
+      aiContext = await groqService.analyze(
         `Given these strategy rules: ${JSON.stringify(strategyRules)}
          And current signals - bullish score: ${bullishScore}, bearish score: ${bearishScore}
          Preliminary decision: ${decision}
@@ -90,7 +79,6 @@ class FinalDecisionAgent {
       decision,
       side,
       confidence: Math.round(confidence * 100) / 100,
-      positionSize: Math.round(positionSize * 100) / 100,
       bullishScore,
       bearishScore,
       threshold,
