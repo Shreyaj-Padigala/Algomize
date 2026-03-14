@@ -116,6 +116,28 @@ header h1 {
   color: var(--text-secondary);
 }
 
+/* Nav Links */
+.nav-link {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  font-family: var(--mono);
+}
+
+.nav-link:hover {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.nav-link.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
 /* Main Layout */
 main {
   height: calc(100vh - 42px);
@@ -483,7 +505,7 @@ main {
 }
 
 .chart-container {
-  height: 280px;
+  height: 420px;
   display: flex;
   flex-direction: column;
 }
@@ -819,6 +841,23 @@ main {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-light);
+}
+
+/* Trades Page */
+.trades-page {
+  height: calc(100vh - 42px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.trades-page-header {
+  flex-shrink: 0;
+}
+
+.trades-page-scroll {
+  flex: 1;
+  overflow-y: auto;
 }
 
 /* Responsive */

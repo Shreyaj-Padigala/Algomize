@@ -25,7 +25,6 @@ const els = {
   lifetimePnl: document.getElementById('lifetimePnl'),
   winRate: document.getElementById('winRate'),
   tradeCount: document.getElementById('tradeCount'),
-  tradesBody: document.getElementById('tradesBody'),
   workflowFeed: document.getElementById('workflowFeed'),
   workflowCount: document.getElementById('workflowCount'),
   signalOverlay: document.getElementById('signalOverlay'),
@@ -191,10 +190,23 @@ socket.on('chart:data', (data) => {
   }
 });
 
+// Real-time candle updates from BloFin WebSocket
+socket.on('chart:update', (data) => {
+  if (!candleSeries || !data.candle || data.timeframe !== '15m') return;
+  const c = data.candle;
+  candleSeries.update({
+    time: Math.floor(c.timestamp / 1000),
+    open: parseFloat(c.open),
+    high: parseFloat(c.high),
+    low: parseFloat(c.low),
+    close: parseFloat(c.close),
+  });
+  els.chartUpdateTime.textContent = new Date().toLocaleTimeString();
+});
+
 socket.on('agent:update', () => loadAgentStatuses());
 
 socket.on('trade:update', () => {
-  loadRecentTrades();
   loadPerformance();
 });
 
@@ -446,28 +458,6 @@ async function loadPerformance() {
   } catch (e) {}
 }
 
-// Trades
-async function loadRecentTrades() {
-  try {
-    const trades = await api('/api/dashboard/trades');
-    els.tradesBody.innerHTML = trades.map((t) => `
-      <tr>
-        <td>${t.id}</td>
-        <td class="trade-${t.side}">${t.side.toUpperCase()}</td>
-        <td>$${parseFloat(t.entry_price || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
-        <td>${t.exit_price ? '$' + parseFloat(t.exit_price).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '--'}</td>
-        <td class="${parseFloat(t.pnl || 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}">
-          ${t.pnl ? '$' + parseFloat(t.pnl).toFixed(2) : '--'}
-        </td>
-        <td class="${t.result === 'win' ? 'trade-win' : t.result === 'loss' ? 'trade-loss' : 'trade-open'}">
-          ${t.result || 'open'}
-        </td>
-        <td>${t.entry_time ? new Date(t.entry_time).toLocaleTimeString() : '--'}</td>
-      </tr>
-    `).join('');
-  } catch (e) {}
-}
-
 async function loadDashboardSummary() {
   try {
     const summary = await api('/api/dashboard/summary');
@@ -518,7 +508,6 @@ async function init() {
 
   await loadStrategies();
   await loadAgentStatuses();
-  await loadRecentTrades();
   await loadPerformance();
   await checkSessionStatus();
   await loadDashboardSummary();
@@ -528,7 +517,6 @@ async function init() {
   api('/api/exchange/connect', { method: 'POST' }).then(() => checkExchange());
 
   setInterval(loadAgentStatuses, 30000);
-  setInterval(loadRecentTrades, 30000);
   setInterval(loadPerformance, 30000);
   setInterval(loadDashboardSummary, 30000);
   setInterval(checkExchange, 60000);

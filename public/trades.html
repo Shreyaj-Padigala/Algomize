@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Algomize — Trade Log</title>
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <div class="header-left">
+        <span class="logo">&gt;_</span>
+        <h1>Algomize</h1>
+      </div>
+      <div class="header-center">
+        <span class="price-tag">BTC/USDT</span>
+        <span class="price-value" id="currentPrice">--</span>
+        <span class="price-source">via BloFin</span>
+      </div>
+      <div class="header-right">
+        <a href="/" class="nav-link">Dashboard</a>
+        <a href="/trades.html" class="nav-link active">Trade Log</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="trades-page">
+      <div class="trades-page-header">
+        <div class="panel-header">
+          <span class="panel-title"># Trade Log</span>
+          <span class="panel-badge" id="tradeCountBadge">0 trades</span>
+        </div>
+      </div>
+      <div class="trades-page-scroll">
+        <table class="trades-table">
+          <thead>
+            <tr>
+              <th>ID</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Result</th><th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="tradesBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const API_BASE = '';
+    const socket = io();
+
+    const els = {
+      currentPrice: document.getElementById('currentPrice'),
+      tradesBody: document.getElementById('tradesBody'),
+      tradeCountBadge: document.getElementById('tradeCountBadge'),
+    };
+
+    async function api(path) {
+      const res = await fetch(`${API_BASE}${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      return res.json();
+    }
+
+    socket.on('market:update', (data) => {
+      els.currentPrice.textContent = `$${parseFloat(data.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    });
+
+    socket.on('connect', () => {
+      socket.emit('market:subscribe');
+    });
+
+    socket.on('trade:update', () => loadTrades());
+
+    async function loadTrades() {
+      try {
+        const trades = await api('/api/dashboard/trades');
+        els.tradeCountBadge.textContent = `${trades.length} trades`;
+        els.tradesBody.innerHTML = trades.map((t) => `
+          <tr>
+            <td>${t.id}</td>
+            <td class="trade-${t.side}">${t.side.toUpperCase()}</td>
+            <td>$${parseFloat(t.entry_price || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+            <td>${t.exit_price ? '$' + parseFloat(t.exit_price).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '--'}</td>
+            <td class="${parseFloat(t.pnl || 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}">
+              ${t.pnl ? '$' + parseFloat(t.pnl).toFixed(2) : '--'}
+            </td>
+            <td class="${t.result === 'win' ? 'trade-win' : t.result === 'loss' ? 'trade-loss' : 'trade-open'}">
+              ${t.result || 'open'}
+            </td>
+            <td>${t.entry_time ? new Date(t.entry_time).toLocaleString() : '--'}</td>
+          </tr>
+        `).join('');
+      } catch (e) {}
+    }
+
+    loadTrades();
+    setInterval(loadTrades, 15000);
+  </script>
+</body>
+</html>

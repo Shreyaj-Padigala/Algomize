@@ -20,6 +20,8 @@
         <span class="price-source">via BloFin</span>
       </div>
       <div class="header-right">
+        <a href="/" class="nav-link active">Dashboard</a>
+        <a href="/trades.html" class="nav-link">Trade Log</a>
         <div class="connection-dot" id="connectionDot"></div>
         <span id="statusText" class="status-text">Disconnected</span>
       </div>
@@ -129,22 +131,6 @@
           </div>
         </div>
 
-        <!-- Trade Log -->
-        <div class="trades-panel">
-          <div class="panel-header">
-            <span class="panel-title"># Trade Log</span>
-          </div>
-          <div class="trades-scroll">
-            <table class="trades-table">
-              <thead>
-                <tr>
-                  <th>ID</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Result</th><th>Time</th>
-                </tr>
-              </thead>
-              <tbody id="tradesBody"></tbody>
-            </table>
-          </div>
-        </div>
       </div>
     </div>
   </main>

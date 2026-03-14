@@ -35,23 +35,25 @@ class MacroTrendAgent {
     const asciiChart = indicatorService.generateAsciiChart(candles1h, 48, 18);
 
     const aiContext = await groqService.analyze(
-      `You are reading a 1-hour BTC/USDT candlestick chart (ASCII representation).
+      `You are reading a 1-hour BTC/USDT candlestick chart. The CURRENT price is $${currentPrice} (rightmost candle).
 '+' = bullish candle, '#' = bearish candle, '|' = wick.
 
 CHART:
 ${asciiChart}
 
-Additional data:
-- Market structure trend: ${structure.trend}
+Context:
+- Structure trend: ${structure.trend}
 - Directional bias (EMA50 vs EMA200): ${directionalBias}
-- Combined macro trend: ${macroTrend}
+- Macro trend: ${macroTrend}
 - Price vs EMA50: ${currentEma50 ? (currentPrice > currentEma50 ? 'above' : 'below') : 'n/a'}
 
-Based on the visual chart pattern and data, provide your analysis as JSON:
+IMPORTANT: Assess whether the macro trend supports entering a trade RIGHT NOW at $${currentPrice}. Do NOT suggest future price targets or entries at other levels.
+
+Respond as JSON:
 {
-  "pattern": "what macro chart pattern you see",
+  "pattern": "macro chart pattern at current price area",
   "bias": "bullish or bearish or neutral",
-  "reasoning": "brief explanation"
+  "reasoning": "why the macro trend does or does not support entry NOW"
 }`
     );
 

@@ -43,14 +43,18 @@ class FinalDecisionAgent {
     let side = null;
     let confidence = 0;
 
-    // If avg long >= 6.5 and long is significantly stronger than short
-    if (avgLong >= this.threshold && avgLong > avgShort) {
+    // Require a minimum spread of 1.5 between long and short to avoid ambiguous signals
+    const spread = Math.abs(avgLong - avgShort);
+    const minSpread = 1.5;
+
+    // If avg long >= 6.5, long is stronger than short, and clear directional bias
+    if (avgLong >= this.threshold && avgLong > avgShort && spread >= minSpread) {
       decision = 'open_long';
       side = 'buy';
       confidence = Math.min(avgLong / 10, 1);
     }
-    // If avg short >= 6.5 and short is significantly stronger than long
-    else if (avgShort >= this.threshold && avgShort > avgLong) {
+    // If avg short >= 6.5, short is stronger than long, and clear directional bias
+    else if (avgShort >= this.threshold && avgShort > avgLong && spread >= minSpread) {
       decision = 'open_short';
       side = 'sell';
       confidence = Math.min(avgShort / 10, 1);
