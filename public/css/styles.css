@@ -488,12 +488,6 @@ main {
   flex-direction: column;
 }
 
-.rsi-container {
-  height: 120px;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border);
-}
 
 .chart-header {
   display: flex;
@@ -520,10 +514,6 @@ main {
   background: var(--bg-primary);
 }
 
-.rsi-canvas {
-  flex: 1;
-  background: var(--bg-primary);
-}
 
 /* Signal Scores */
 .signal-scores {
@@ -651,12 +641,23 @@ main {
   word-break: break-word;
 }
 
-/* Signal Prompt */
-.signal-prompt {
-  margin: 0 16px;
+/* Signal Overlay */
+.signal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.signal-modal {
+  width: 460px;
+  max-width: 90vw;
   border: 2px solid var(--warning);
-  border-radius: 6px;
-  background: rgba(243, 156, 18, 0.08);
+  border-radius: 8px;
+  background: var(--bg-secondary);
   overflow: hidden;
   animation: signalPulse 2s infinite;
 }

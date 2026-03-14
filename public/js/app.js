@@ -8,8 +8,6 @@ let sessionRunning = false;
 let workflowCount = 0;
 let priceChart = null;
 let candleSeries = null;
-let rsiChart = null;
-let rsiSeries = null;
 
 // DOM
 const els = {
@@ -30,7 +28,7 @@ const els = {
   tradesBody: document.getElementById('tradesBody'),
   workflowFeed: document.getElementById('workflowFeed'),
   workflowCount: document.getElementById('workflowCount'),
-  signalPrompt: document.getElementById('signalPrompt'),
+  signalOverlay: document.getElementById('signalOverlay'),
   signalSide: document.getElementById('signalSide'),
   signalPrice: document.getElementById('signalPrice'),
   signalConfidence: document.getElementById('signalConfidence'),
@@ -43,7 +41,6 @@ const els = {
   loss2: document.getElementById('loss2'),
   loss3: document.getElementById('loss3'),
   chartUpdateTime: document.getElementById('chartUpdateTime'),
-  rsiValue: document.getElementById('rsiValue'),
 };
 
 // ---------- Cash Register Sound ----------
@@ -145,69 +142,11 @@ function initCharts() {
     wickDownColor: '#e94560',
   });
 
-  // RSI chart
-  const rsiContainer = document.getElementById('rsiChart');
-  rsiChart = LightweightCharts.createChart(rsiContainer, {
-    width: rsiContainer.clientWidth,
-    height: rsiContainer.clientHeight,
-    layout: {
-      background: { type: 'solid', color: chartColors.background },
-      textColor: chartColors.textColor,
-      fontSize: 10,
-    },
-    grid: {
-      vertLines: { color: chartColors.gridColor },
-      horzLines: { color: chartColors.gridColor },
-    },
-    crosshair: { mode: 0 },
-    rightPriceScale: {
-      borderColor: '#233554',
-      scaleMargins: { top: 0.1, bottom: 0.1 },
-    },
-    timeScale: {
-      borderColor: '#233554',
-      timeVisible: true,
-      visible: false,
-    },
-  });
-
-  rsiSeries = rsiChart.addLineSeries({
-    color: '#f39c12',
-    lineWidth: 2,
-    priceFormat: { type: 'custom', formatter: v => v.toFixed(1) },
-  });
-
-  // Overbought/oversold lines
-  const obLine = rsiChart.addLineSeries({
-    color: 'rgba(233, 69, 96, 0.4)',
-    lineWidth: 1,
-    lineStyle: 2,
-    priceLineVisible: false,
-    lastValueVisible: false,
-  });
-  const osLine = rsiChart.addLineSeries({
-    color: 'rgba(0, 210, 255, 0.4)',
-    lineWidth: 1,
-    lineStyle: 2,
-    priceLineVisible: false,
-    lastValueVisible: false,
-  });
-
-  // Store for reference lines
-  window._rsiRefLines = { obLine, osLine };
-
-  // Sync time scales
-  priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-    if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
-  });
-
   // Resize handler
   const resizeObserver = new ResizeObserver(() => {
     priceChart.applyOptions({ width: priceContainer.clientWidth, height: priceContainer.clientHeight });
-    rsiChart.applyOptions({ width: rsiContainer.clientWidth, height: rsiContainer.clientHeight });
   });
   resizeObserver.observe(priceContainer);
-  resizeObserver.observe(rsiContainer);
 }
 
 function updateCharts(candles15m) {
@@ -215,40 +154,14 @@ function updateCharts(candles15m) {
 
   const candleData = candles15m.map(c => ({
     time: Math.floor(c.timestamp / 1000),
-    open: c.open,
-    high: c.high,
-    low: c.low,
-    close: c.close,
-  }));
+    open: parseFloat(c.open),
+    high: parseFloat(c.high),
+    low: parseFloat(c.low),
+    close: parseFloat(c.close),
+  })).sort((a, b) => a.time - b.time);
 
   candleSeries.setData(candleData);
   els.chartUpdateTime.textContent = new Date().toLocaleTimeString();
-}
-
-function updateRsiChart(candles15m, rsiValues) {
-  if (!rsiSeries || !rsiValues || rsiValues.length === 0) return;
-
-  // RSI values start at index 14 (period offset)
-  const offset = candles15m.length - rsiValues.length;
-  const rsiData = rsiValues.map((v, i) => ({
-    time: Math.floor(candles15m[i + offset].timestamp / 1000),
-    value: v,
-  }));
-
-  rsiSeries.setData(rsiData);
-
-  // Reference lines
-  if (window._rsiRefLines && rsiData.length > 1) {
-    const times = [rsiData[0].time, rsiData[rsiData.length - 1].time];
-    window._rsiRefLines.obLine.setData(times.map(t => ({ time: t, value: 70 })));
-    window._rsiRefLines.osLine.setData(times.map(t => ({ time: t, value: 30 })));
-  }
-
-  if (rsiValues.length > 0) {
-    const current = rsiValues[rsiValues.length - 1];
-    els.rsiValue.textContent = current.toFixed(1);
-    els.rsiValue.style.color = current >= 70 ? 'var(--danger)' : current <= 30 ? 'var(--success)' : 'var(--text-dim)';
-  }
 }
 
 // ---------- API ----------
@@ -275,17 +188,6 @@ socket.on('market:update', (data) => {
 socket.on('chart:data', (data) => {
   if (data.candles15m) {
     updateCharts(data.candles15m);
-    // Calculate RSI for chart
-    const closes = data.candles15m.map(c => c.close);
-    // Simple RSI calc for chart (matches server)
-    const rsiValues = calcRSI(closes, 14);
-    updateRsiChart(data.candles15m, rsiValues);
-  }
-});
-
-socket.on('rsi:data', (data) => {
-  if (data.current) {
-    els.rsiValue.textContent = data.current.toFixed(1);
   }
 });
 
@@ -310,7 +212,7 @@ socket.on('session:update', (data) => {
     els.sessionStatus.textContent = data.reason || 'Stopped';
     els.sessionStatus.style.color = 'var(--text-dim)';
     setBotIndicator(false);
-    els.signalPrompt.style.display = 'none';
+    els.signalOverlay.style.display = 'none';
   }
   updateSessionButtons();
 });
@@ -321,28 +223,6 @@ socket.on('signal:prompt', (data) => {
   playCashRegister();
   showSignalPrompt(data);
 });
-
-// ---------- Client-side RSI calculation (for chart) ----------
-function calcRSI(closes, period) {
-  if (closes.length < period + 1) return [];
-  const rsi = [];
-  const gains = [], losses = [];
-  for (let i = 1; i <= period; i++) {
-    const ch = closes[i] - closes[i - 1];
-    gains.push(ch > 0 ? ch : 0);
-    losses.push(ch < 0 ? Math.abs(ch) : 0);
-  }
-  let avgG = gains.reduce((s, g) => s + g, 0) / period;
-  let avgL = losses.reduce((s, l) => s + l, 0) / period;
-  rsi.push(100 - 100 / (1 + (avgL === 0 ? 100 : avgG / avgL)));
-  for (let i = period + 1; i < closes.length; i++) {
-    const ch = closes[i] - closes[i - 1];
-    avgG = (avgG * (period - 1) + (ch > 0 ? ch : 0)) / period;
-    avgL = (avgL * (period - 1) + (ch < 0 ? Math.abs(ch) : 0)) / period;
-    rsi.push(100 - 100 / (1 + (avgL === 0 ? 100 : avgG / avgL)));
-  }
-  return rsi;
-}
 
 // ---------- UI Helpers ----------
 function updateConnectionStatus(connected) {
@@ -400,7 +280,7 @@ const AGENT_LABELS = {
 };
 
 function showSignalPrompt(data) {
-  els.signalPrompt.style.display = 'block';
+  els.signalOverlay.style.display = 'flex';
   els.signalSide.textContent = data.side === 'buy' ? 'LONG' : 'SHORT';
   els.signalSide.className = `signal-side ${data.side}`;
   els.signalPrice.textContent = `$${parseFloat(data.entryPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
@@ -427,11 +307,11 @@ function showSignalPrompt(data) {
     `;
   }
 
-  els.signalPrompt.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // No need to scroll — overlay is fixed and centered
 }
 
 els.btnAcceptSignal.addEventListener('click', async () => {
-  els.signalPrompt.style.display = 'none';
+  els.signalOverlay.style.display = 'none';
   await api('/api/session/signal/respond', {
     method: 'POST',
     body: JSON.stringify({ accepted: true }),
@@ -439,7 +319,7 @@ els.btnAcceptSignal.addEventListener('click', async () => {
 });
 
 els.btnRejectSignal.addEventListener('click', async () => {
-  els.signalPrompt.style.display = 'none';
+  els.signalOverlay.style.display = 'none';
   await api('/api/session/signal/respond', {
     method: 'POST',
     body: JSON.stringify({ accepted: false }),
@@ -626,13 +506,6 @@ async function loadInitialChartData() {
     const data = await api('/api/chart/btcusdt/15m');
     if (data.candles) {
       updateCharts(data.candles);
-      if (data.rsi) {
-        updateRsiChart(data.candles, data.rsi);
-      } else {
-        const closes = data.candles.map(c => c.close);
-        const rsi = calcRSI(closes, 14);
-        updateRsiChart(data.candles, rsi);
-      }
     }
   } catch (e) {
     console.log('Chart data not available yet');

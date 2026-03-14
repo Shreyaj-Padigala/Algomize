@@ -28,7 +28,6 @@
 
   <main>
     <div class="layout">
-      <!-- Left Sidebar -->
       <aside class="sidebar">
         <div class="sidebar-section">
           <div class="section-header">
@@ -105,9 +104,8 @@
         </div>
       </aside>
 
-      <!-- Main Content -->
       <div class="main-content">
-        <!-- Charts Area -->
+        <!-- Chart -->
         <div class="charts-area">
           <div class="chart-container">
             <div class="chart-header">
@@ -116,16 +114,9 @@
             </div>
             <div id="priceChart" class="chart-canvas"></div>
           </div>
-          <div class="rsi-container">
-            <div class="chart-header">
-              <span class="chart-title">RSI (14)</span>
-              <span class="chart-badge" id="rsiValue">--</span>
-            </div>
-            <div id="rsiChart" class="rsi-canvas"></div>
-          </div>
         </div>
 
-        <!-- Workflow + Signal -->
+        <!-- Workflow -->
         <div class="workflow-panel">
           <div class="panel-header">
             <span class="panel-title">&gt; Workflow</span>
@@ -134,26 +125,6 @@
           <div class="workflow-feed" id="workflowFeed">
             <div class="workflow-empty">
               <span class="empty-prompt">&gt;</span> Start a bot to see the agent workflow here...
-            </div>
-          </div>
-        </div>
-
-        <!-- Signal Prompt -->
-        <div class="signal-prompt" id="signalPrompt" style="display: none;">
-          <div class="signal-header">ENTRY SIGNAL DETECTED</div>
-          <div class="signal-body">
-            <div class="signal-detail">
-              <span class="signal-side" id="signalSide">--</span>
-              <span class="signal-price">at <span id="signalPrice">--</span></span>
-            </div>
-            <div class="signal-scores" id="signalScores"></div>
-            <div class="signal-confidence">
-              Confidence: <span id="signalConfidence">--</span>
-            </div>
-            <div class="signal-question">Do you want to place this trade for 100X Leverage?</div>
-            <div class="signal-actions">
-              <button class="btn-yes" id="btnAcceptSignal">Yes, Enter Trade</button>
-              <button class="btn-no" id="btnRejectSignal">No, Skip</button>
             </div>
           </div>
         </div>
@@ -177,6 +148,28 @@
       </div>
     </div>
   </main>
+
+  <!-- Signal Modal Overlay (outside layout so it's always on top) -->
+  <div class="signal-overlay" id="signalOverlay" style="display: none;">
+    <div class="signal-modal">
+      <div class="signal-header">ENTRY SIGNAL DETECTED</div>
+      <div class="signal-body">
+        <div class="signal-detail">
+          <span class="signal-side" id="signalSide">--</span>
+          <span class="signal-price">at <span id="signalPrice">--</span></span>
+        </div>
+        <div class="signal-scores" id="signalScores"></div>
+        <div class="signal-confidence">
+          Confidence: <span id="signalConfidence">--</span>
+        </div>
+        <div class="signal-question">Do you want to place this trade for 100X Leverage?</div>
+        <div class="signal-actions">
+          <button class="btn-yes" id="btnAcceptSignal">Yes, Enter Trade</button>
+          <button class="btn-no" id="btnRejectSignal">No, Skip</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="/js/app.js"></script>
