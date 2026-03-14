@@ -1,87 +1,59 @@
-const geminiService = require('../services/geminiService');
-const config = require('../config');
-
 class FinalDecisionAgent {
   constructor() {
     this.name = 'finalDecision';
     this.lastOutput = null;
-    this.maxPortfolioPercent = config.trading.maxPortfolioPercent;
+    this.threshold = 6.5;
   }
 
-  async analyze({ confluence, microTrend, macroTrend, rsi, ict, strategyRules, portfolioBalance }) {
-    // Score-based decision system
-    let bullishScore = 0;
-    let bearishScore = 0;
+  async analyze({ confluence, microTrend, macroTrend, rsi, ict }) {
+    // Collect all agent scores
+    const agentScores = {};
+    const scoringAgents = [];
 
-    // Macro Trend (weight: 3)
-    if (macroTrend && macroTrend.macroTrend === 'bullish') bullishScore += 3;
-    if (macroTrend && macroTrend.macroTrend === 'bearish') bearishScore += 3;
-
-    // Micro Trend (weight: 2)
-    if (microTrend && microTrend.trend === 'bullish') bullishScore += 2;
-    if (microTrend && microTrend.trend === 'bearish') bearishScore += 2;
-
-    // RSI (weight: 2)
+    if (confluence) {
+      agentScores.confluence = { longScore: confluence.longScore, shortScore: confluence.shortScore };
+      scoringAgents.push(agentScores.confluence);
+    }
+    if (microTrend) {
+      agentScores.microTrend = { longScore: microTrend.longScore, shortScore: microTrend.shortScore };
+      scoringAgents.push(agentScores.microTrend);
+    }
+    if (macroTrend) {
+      agentScores.macroTrend = { longScore: macroTrend.longScore, shortScore: macroTrend.shortScore };
+      scoringAgents.push(agentScores.macroTrend);
+    }
     if (rsi) {
-      if (rsi.oversold) bullishScore += 2;
-      if (rsi.overbought) bearishScore += 2;
-      if (rsi.bullishDivergence) bullishScore += 2;
-      if (rsi.bearishDivergence) bearishScore += 2;
+      agentScores.rsi = { longScore: rsi.longScore, shortScore: rsi.shortScore };
+      scoringAgents.push(agentScores.rsi);
     }
-
-    // Confluence (weight: 1)
-    if (confluence && confluence.proximitySignal === 'near_key_level') {
-      const nearSupport = confluence.nearbyLevels.some((l) => l.type === 'support');
-      const nearResistance = confluence.nearbyLevels.some((l) => l.type === 'resistance');
-      if (nearSupport) bullishScore += 1;
-      if (nearResistance) bearishScore += 1;
-    }
-
-    // ICT (weight: 2)
     if (ict) {
-      if (ict.liquiditySweeps.some((s) => s.type === 'buy_side_sweep')) bullishScore += 2;
-      if (ict.liquiditySweeps.some((s) => s.type === 'sell_side_sweep')) bearishScore += 2;
-      if (ict.premiumDiscount && ict.premiumDiscount.zone === 'discount') bullishScore += 1;
-      if (ict.premiumDiscount && ict.premiumDiscount.zone === 'premium') bearishScore += 1;
-      if (ict.marketStructureShift) {
-        if (ict.marketStructureShift.type === 'bullish_bos') bullishScore += 2;
-        if (ict.marketStructureShift.type === 'bearish_bos') bearishScore += 2;
-      }
+      agentScores.ict = { longScore: ict.longScore, shortScore: ict.shortScore };
+      scoringAgents.push(agentScores.ict);
     }
 
-    // Determine decision
-    const threshold = 5;
+    // Calculate averages
+    const count = scoringAgents.length || 1;
+    const avgLong = scoringAgents.reduce((sum, s) => sum + s.longScore, 0) / count;
+    const avgShort = scoringAgents.reduce((sum, s) => sum + s.shortScore, 0) / count;
+
+    const avgLongRounded = Math.round(avgLong * 10) / 10;
+    const avgShortRounded = Math.round(avgShort * 10) / 10;
+
     let decision = 'no_trade';
     let side = null;
     let confidence = 0;
 
-    if (bullishScore >= threshold && bullishScore > bearishScore + 2) {
+    // If avg long >= 6.5 and long is significantly stronger than short
+    if (avgLong >= this.threshold && avgLong > avgShort) {
       decision = 'open_long';
       side = 'buy';
-      confidence = Math.min(bullishScore / 12, 1);
-    } else if (bearishScore >= threshold && bearishScore > bullishScore + 2) {
+      confidence = Math.min(avgLong / 10, 1);
+    }
+    // If avg short >= 6.5 and short is significantly stronger than long
+    else if (avgShort >= this.threshold && avgShort > avgLong) {
       decision = 'open_short';
       side = 'sell';
-      confidence = Math.min(bearishScore / 12, 1);
-    }
-
-    // Position sizing: max 50% of portfolio
-    let positionSize = 0;
-    if (decision !== 'no_trade' && portfolioBalance > 0) {
-      const maxAmount = portfolioBalance * (this.maxPortfolioPercent / 100);
-      positionSize = maxAmount * confidence;
-    }
-
-    // AI interpretation of strategy rules
-    let aiContext = null;
-    if (strategyRules && Object.keys(strategyRules).length > 0) {
-      aiContext = await geminiService.analyze(
-        `Given these strategy rules: ${JSON.stringify(strategyRules)}
-         And current signals - bullish score: ${bullishScore}, bearish score: ${bearishScore}
-         Preliminary decision: ${decision}
-         Should we proceed with this trade? Interpret the strategy rules contextually.
-         Do NOT perform calculations.`
-      );
+      confidence = Math.min(avgShort / 10, 1);
     }
 
     this.lastOutput = {
@@ -90,11 +62,10 @@ class FinalDecisionAgent {
       decision,
       side,
       confidence: Math.round(confidence * 100) / 100,
-      positionSize: Math.round(positionSize * 100) / 100,
-      bullishScore,
-      bearishScore,
-      threshold,
-      aiContext,
+      avgLongScore: avgLongRounded,
+      avgShortScore: avgShortRounded,
+      threshold: this.threshold,
+      agentScores,
     };
 
     return this.lastOutput;

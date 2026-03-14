@@ -1,5 +1,5 @@
 const indicatorService = require('../services/indicatorService');
-const geminiService = require('../services/geminiService');
+const groqService = require('../services/groqService');
 
 class ConfluenceAgent {
   constructor() {
@@ -8,23 +8,18 @@ class ConfluenceAgent {
   }
 
   async analyze(candles15m, candles1h) {
-    // Find support and resistance on both timeframes
     const levels15m = indicatorService.findSupportResistance(candles15m, 50);
     const levels1h = indicatorService.findSupportResistance(candles1h, 50);
-
     const currentPrice = candles15m[candles15m.length - 1].close;
 
-    // Find proximity to key levels
     const allLevels = [...levels15m, ...levels1h];
     const nearbyLevels = allLevels.filter(
       (l) => Math.abs(l.price - currentPrice) / currentPrice < 0.005
     );
 
-    // Detect prior reactions at these levels
     const reactions = this._findPriorReactions(candles15m, allLevels);
 
-    // Use Gemini for contextual interpretation only
-    const aiContext = await geminiService.analyze(
+    const aiContext = await groqService.analyze(
       `Interpret these support/resistance levels for BTC/USDT trading context.
        Current price: ${currentPrice}
        Support levels: ${JSON.stringify(levels15m.filter(l => l.type === 'support').slice(0, 3))}
@@ -32,6 +27,36 @@ class ConfluenceAgent {
        Nearby levels count: ${nearbyLevels.length}
        Do NOT calculate anything. Just interpret the significance.`
     );
+
+    // Score /10
+    let longScore = 5;
+    let shortScore = 5;
+
+    const nearSupports = nearbyLevels.filter(l => l.type === 'support');
+    const nearResistances = nearbyLevels.filter(l => l.type === 'resistance');
+
+    // Near strong support = bullish bounce potential
+    if (nearSupports.length > 0) {
+      const strongSupport = nearSupports.some(l => l.strength >= 2);
+      longScore += strongSupport ? 3 : 2;
+      shortScore -= 1;
+    }
+
+    // Near strong resistance = bearish rejection potential
+    if (nearResistances.length > 0) {
+      const strongResistance = nearResistances.some(l => l.strength >= 2);
+      shortScore += strongResistance ? 3 : 2;
+      longScore -= 1;
+    }
+
+    // If in open space, neutral
+    if (nearbyLevels.length === 0) {
+      longScore = 5;
+      shortScore = 5;
+    }
+
+    longScore = Math.max(1, Math.min(10, longScore));
+    shortScore = Math.max(1, Math.min(10, shortScore));
 
     this.lastOutput = {
       agent: this.name,
@@ -43,6 +68,8 @@ class ConfluenceAgent {
       priorReactions: reactions,
       proximitySignal: nearbyLevels.length > 0 ? 'near_key_level' : 'in_open_space',
       aiContext,
+      longScore,
+      shortScore,
     };
 
     return this.lastOutput;

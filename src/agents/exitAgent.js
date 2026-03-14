@@ -4,7 +4,9 @@ class ExitAgent {
   constructor() {
     this.name = 'exit';
     this.lastOutput = null;
-    this.maxTradeDurationMs = 4 * 60 * 60 * 1000; // 4 hours default
+    // At 100x leverage, -30% account loss = 0.30% adverse price move
+    this.stopLossPercent = 0.003;
+    this.maxTradeDurationMs = 4 * 60 * 60 * 1000; // 4 hours
   }
 
   async analyze({ openTrade, candles15m, rsiData }) {
@@ -22,50 +24,38 @@ class ExitAgent {
     const triggers = [];
     let shouldClose = false;
 
-    // Stop loss check (2% default)
-    const stopLossPercent = 0.02;
-    if (side === 'buy' && currentPrice <= entryPrice * (1 - stopLossPercent)) {
-      triggers.push('stop_loss');
+    // Condition 1: -30% at 100x leverage (0.30% adverse price move)
+    if (side === 'buy' && currentPrice <= entryPrice * (1 - this.stopLossPercent)) {
+      triggers.push('stop_loss_30pct');
       shouldClose = true;
     }
-    if (side === 'sell' && currentPrice >= entryPrice * (1 + stopLossPercent)) {
-      triggers.push('stop_loss');
-      shouldClose = true;
-    }
-
-    // Take profit check (4% default)
-    const takeProfitPercent = 0.04;
-    if (side === 'buy' && currentPrice >= entryPrice * (1 + takeProfitPercent)) {
-      triggers.push('take_profit');
-      shouldClose = true;
-    }
-    if (side === 'sell' && currentPrice <= entryPrice * (1 - takeProfitPercent)) {
-      triggers.push('take_profit');
+    if (side === 'sell' && currentPrice >= entryPrice * (1 + this.stopLossPercent)) {
+      triggers.push('stop_loss_30pct');
       shouldClose = true;
     }
 
-    // RSI reversal
+    // Condition 2: RSI divergence indicating big move against position
     if (rsiData) {
-      if (side === 'buy' && rsiData.overbought) {
-        triggers.push('rsi_reversal');
+      if (side === 'buy' && rsiData.bearishDivergence) {
+        triggers.push('rsi_bearish_divergence');
         shouldClose = true;
       }
-      if (side === 'sell' && rsiData.oversold) {
-        triggers.push('rsi_reversal');
+      if (side === 'sell' && rsiData.bullishDivergence) {
+        triggers.push('rsi_bullish_divergence');
         shouldClose = true;
       }
     }
 
-    // Trend invalidation
+    // Condition 3: Trend reversal (BOS in opposite direction)
     const structure = indicatorService.detectMarketStructure(candles15m);
     if (side === 'buy' && structure.trend === 'bearish' && structure.bos &&
         structure.bos.type === 'bearish_bos') {
-      triggers.push('trend_invalidation');
+      triggers.push('trend_reversal');
       shouldClose = true;
     }
     if (side === 'sell' && structure.trend === 'bullish' && structure.bos &&
         structure.bos.type === 'bullish_bos') {
-      triggers.push('trend_invalidation');
+      triggers.push('trend_reversal');
       shouldClose = true;
     }
 
@@ -75,14 +65,19 @@ class ExitAgent {
       shouldClose = true;
     }
 
-    // Calculate PnL
+    // Calculate PnL (at 100x leverage)
     let unrealizedPnl = 0;
     const positionSize = parseFloat(openTrade.position_size);
+    const leverage = parseFloat(openTrade.leverage) || 100;
     if (side === 'buy') {
-      unrealizedPnl = (currentPrice - entryPrice) * positionSize;
+      unrealizedPnl = (currentPrice - entryPrice) / entryPrice * leverage * positionSize;
     } else {
-      unrealizedPnl = (entryPrice - currentPrice) * positionSize;
+      unrealizedPnl = (entryPrice - currentPrice) / entryPrice * leverage * positionSize;
     }
+
+    const priceChangePercent = side === 'buy'
+      ? ((currentPrice - entryPrice) / entryPrice * 100)
+      : ((entryPrice - currentPrice) / entryPrice * 100);
 
     this.lastOutput = {
       agent: this.name,
@@ -91,8 +86,10 @@ class ExitAgent {
       triggers,
       currentPrice,
       entryPrice,
+      priceChangePercent: Math.round(priceChangePercent * 10000) / 10000,
+      leveragedPnlPercent: Math.round(priceChangePercent * leverage * 100) / 100,
       unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
-      elapsed: Math.round(elapsed / 60000), // minutes
+      elapsed: Math.round(elapsed / 60000),
       tradeId: openTrade.id,
     };
 

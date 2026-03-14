@@ -7,7 +7,6 @@ const ICTAgent = require('./ictAgent');
 const FinalDecisionAgent = require('./finalDecisionAgent');
 const ExitAgent = require('./exitAgent');
 const marketService = require('../services/marketService');
-const exchangeService = require('../services/exchangeService');
 const pool = require('../db/pool');
 
 class Orchestrator {
@@ -29,20 +28,27 @@ class Orchestrator {
     this.running = false;
     this.enabledAgents = new Set(Object.keys(this.agents));
     this.lastCycleResults = {};
+    this.consecutiveLosses = 0;
+    this.maxConsecutiveLosses = 3;
+    this.pendingSignal = null;
+    this.currentTrade = null;
+    this.tradeLog = [];
   }
 
   async startSession(strategyId) {
     if (this.running) {
-      throw new Error('A strategy session is already running');
+      throw new Error('A bot is already running. Stop it before starting a new one.');
     }
 
-    // Load strategy
     const stratResult = await pool.query('SELECT * FROM strategies WHERE id = $1', [strategyId]);
     if (stratResult.rows.length === 0) throw new Error('Strategy not found');
 
     this.activeStrategy = stratResult.rows[0];
+    this.consecutiveLosses = 0;
+    this.pendingSignal = null;
+    this.currentTrade = null;
+    this.tradeLog = [];
 
-    // Load enabled agents for this strategy
     const agentResult = await pool.query(
       'SELECT * FROM strategy_agents WHERE strategy_id = $1',
       [strategyId]
@@ -53,10 +59,8 @@ class Orchestrator {
       );
     }
 
-    // Mark strategy as active
     await pool.query('UPDATE strategies SET session_active = TRUE WHERE id = $1', [strategyId]);
 
-    // Create session record
     const session = await pool.query(
       'INSERT INTO sessions (strategy_id) VALUES ($1) RETURNING *',
       [strategyId]
@@ -64,27 +68,18 @@ class Orchestrator {
 
     this.running = true;
     this._emit('session:update', { status: 'started', strategyId, sessionId: session.rows[0].id });
+    this._emitWorkflow('system', 'Bot started', `Strategy: ${this.activeStrategy.name} | Looking for entry signals...`);
 
-    // Set leverage
-    try {
-      await exchangeService.setLeverage('BTC-USDT', this.activeStrategy.leverage);
-    } catch (err) {
-      console.error('Failed to set leverage:', err.message);
-    }
-
-    // Start workflow loop (runs every 60 seconds)
     this.workflowInterval = setInterval(() => this._runWorkflow(), 60000);
-    // Run immediately
     this._runWorkflow();
 
-    // Session timer (12 hours)
     const durationMs = 12 * 60 * 60 * 1000;
-    this.sessionTimer = setTimeout(() => this.stopSession(), durationMs);
+    this.sessionTimer = setTimeout(() => this.stopSession('Session duration limit reached'), durationMs);
 
     return { status: 'started', strategyId, sessionId: session.rows[0].id };
   }
 
-  async stopSession() {
+  async stopSession(reason = 'User stopped') {
     if (!this.running) return { status: 'not_running' };
 
     this.running = false;
@@ -99,47 +94,106 @@ class Orchestrator {
       );
     }
 
-    this._emit('session:update', { status: 'stopped', strategyId: this.activeStrategy?.id });
+    this._emitWorkflow('system', 'Bot stopped', reason);
+    this._emit('session:update', { status: 'stopped', strategyId: this.activeStrategy?.id, reason });
     this.activeStrategy = null;
+    this.pendingSignal = null;
 
-    return { status: 'stopped' };
+    return { status: 'stopped', reason };
+  }
+
+  async handleSignalResponse(accepted) {
+    if (!this.pendingSignal) return { error: 'No pending signal' };
+
+    if (accepted) {
+      await this._openTrade(this.pendingSignal);
+      this._emitWorkflow('trade', 'Trade opened',
+        `${this.pendingSignal.side.toUpperCase()} at $${this.pendingSignal.entryPrice.toLocaleString()} | 100x Leverage | Watching for exit...`);
+    } else {
+      this._emitWorkflow('system', 'Signal rejected', 'User declined the trade. Continuing to scan...');
+    }
+
+    this.pendingSignal = null;
+    return { status: accepted ? 'trade_opened' : 'signal_rejected' };
   }
 
   async _runWorkflow() {
     if (!this.running || !this.activeStrategy) return;
 
     try {
-      // Fetch market data
+      this._emitWorkflow('scan', 'Scanning market', 'Fetching candle data...');
+
       const candles15m = await marketService.getCandles('15m', 200);
       const candles1h = await marketService.getCandles('1h', 200);
+      const currentPrice = candles15m[candles15m.length - 1].close;
+
+      // Send chart data to frontend
+      this._emit('chart:data', {
+        candles15m: candles15m.slice(-192), // ~2 days of 15m candles
+        candles1h: candles1h.slice(-48),    // 2 days of 1h candles
+      });
 
       const results = {};
+      const agentTasks = [];
 
-      // Run analysis agents
-      if (this.enabledAgents.has('confluence')) {
-        results.confluence = await this.agents.confluence.analyze(candles15m, candles1h);
-        this._emit('agent:update', { agent: 'confluence', data: results.confluence });
+      if (this.enabledAgents.has('rsi')) {
+        agentTasks.push(
+          this.agents.rsi.analyze(candles15m).then(r => {
+            results.rsi = r;
+            this._emitWorkflow('agent', 'RSI',
+              `RSI: ${r.currentRSI}, ${r.divLabel} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+            this._emit('agent:update', { agent: 'rsi', data: this._summarizeAgent('rsi', r) });
+            // Send RSI data for chart
+            this._emit('rsi:data', { values: r.rsiHistory, current: r.currentRSI });
+          })
+        );
       }
 
       if (this.enabledAgents.has('microTrend')) {
-        results.microTrend = await this.agents.microTrend.analyze(candles15m);
-        this._emit('agent:update', { agent: 'microTrend', data: results.microTrend });
+        agentTasks.push(
+          this.agents.microTrend.analyze(candles15m).then(r => {
+            results.microTrend = r;
+            this._emitWorkflow('agent', 'Micro Trend (15m)',
+              `${r.pattern || r.trend} | EMA: ${r.emaTrend} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+            this._emit('agent:update', { agent: 'microTrend', data: this._summarizeAgent('microTrend', r) });
+          })
+        );
       }
 
       if (this.enabledAgents.has('macroTrend')) {
-        results.macroTrend = await this.agents.macroTrend.analyze(candles1h);
-        this._emit('agent:update', { agent: 'macroTrend', data: results.macroTrend });
+        agentTasks.push(
+          this.agents.macroTrend.analyze(candles1h).then(r => {
+            results.macroTrend = r;
+            this._emitWorkflow('agent', 'Macro Trend (1h)',
+              `${r.pattern || r.macroTrend} | Bias: ${r.directionalBias} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+            this._emit('agent:update', { agent: 'macroTrend', data: this._summarizeAgent('macroTrend', r) });
+          })
+        );
       }
 
-      if (this.enabledAgents.has('rsi')) {
-        results.rsi = await this.agents.rsi.analyze(candles15m);
-        this._emit('agent:update', { agent: 'rsi', data: results.rsi });
+      if (this.enabledAgents.has('confluence')) {
+        agentTasks.push(
+          this.agents.confluence.analyze(candles15m, candles1h).then(r => {
+            results.confluence = r;
+            this._emitWorkflow('agent', 'Confluence',
+              `${r.proximitySignal === 'near_key_level' ? `Near key level (${r.nearbyLevels.length})` : 'Open space'} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+            this._emit('agent:update', { agent: 'confluence', data: this._summarizeAgent('confluence', r) });
+          })
+        );
       }
 
       if (this.enabledAgents.has('ict')) {
-        results.ict = await this.agents.ict.analyze(candles15m, candles1h);
-        this._emit('agent:update', { agent: 'ict', data: results.ict });
+        agentTasks.push(
+          this.agents.ict.analyze(candles15m, candles1h).then(r => {
+            results.ict = r;
+            this._emitWorkflow('agent', 'ICT',
+              `Zone: ${r.premiumDiscount?.zone || 'n/a'} | Sweeps: ${r.liquiditySweeps?.length || 0} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+            this._emit('agent:update', { agent: 'ict', data: this._summarizeAgent('ict', r) });
+          })
+        );
       }
+
+      await Promise.all(agentTasks);
 
       // Check for open trades - Exit Agent
       const openTrades = await pool.query(
@@ -154,109 +208,95 @@ class Orchestrator {
           candles15m,
           rsiData: results.rsi,
         });
-        this._emit('agent:update', { agent: 'exit', data: results.exit });
+        this._emit('agent:update', { agent: 'exit', data: this._summarizeAgent('exit', results.exit) });
 
         if (results.exit.shouldClose) {
+          this._emitWorkflow('exit', 'Exit signal triggered',
+            `Triggers: ${results.exit.triggers.join(', ')} | PnL: $${results.exit.unrealizedPnl.toFixed(2)}`);
           await this._closeTrade(openTrade, results.exit);
+        } else {
+          const pnlPercent = ((currentPrice - parseFloat(openTrade.entry_price)) / parseFloat(openTrade.entry_price) * 100 * 100).toFixed(2);
+          this._emitWorkflow('holding', 'Position open',
+            `${openTrade.side.toUpperCase()} from $${parseFloat(openTrade.entry_price).toLocaleString()} | Current: $${currentPrice.toLocaleString()} | PnL: ${pnlPercent}%`);
         }
       }
 
-      // Final Decision Agent (only if no open trade)
-      if (openTrades.rows.length === 0 && this.enabledAgents.has('finalDecision')) {
-        // Get portfolio balance
-        let portfolioBalance = 0;
-        try {
-          const balResult = await exchangeService.getAccountBalance();
-          if (balResult.data && balResult.data.length > 0) {
-            portfolioBalance = parseFloat(balResult.data[0].totalEq || 0);
-          }
-        } catch (err) {
-          console.error('Failed to fetch balance:', err.message);
-        }
-
+      // Final Decision Agent (only if no open trade and no pending signal)
+      if (openTrades.rows.length === 0 && !this.pendingSignal && this.enabledAgents.has('finalDecision')) {
         results.finalDecision = await this.agents.finalDecision.analyze({
           confluence: results.confluence,
           microTrend: results.microTrend,
           macroTrend: results.macroTrend,
           rsi: results.rsi,
           ict: results.ict,
-          strategyRules: this.activeStrategy.rules || {},
-          portfolioBalance,
         });
-        this._emit('agent:update', { agent: 'finalDecision', data: results.finalDecision });
+        this._emit('agent:update', { agent: 'finalDecision', data: this._summarizeAgent('finalDecision', results.finalDecision) });
 
         if (results.finalDecision.decision !== 'no_trade') {
-          await this._openTrade(results.finalDecision, results);
+          this._emitWorkflow('signal', 'ENTRY SIGNAL',
+            `${results.finalDecision.side === 'buy' ? 'LONG' : 'SHORT'} 100X | Avg Long: ${results.finalDecision.avgLongScore}/10 | Avg Short: ${results.finalDecision.avgShortScore}/10`);
+
+          this.pendingSignal = {
+            ...results.finalDecision,
+            entryPrice: currentPrice,
+            timestamp: Date.now(),
+            agentResults: results.finalDecision.agentScores,
+          };
+
+          this._emit('signal:prompt', {
+            side: results.finalDecision.side,
+            confidence: results.finalDecision.confidence,
+            entryPrice: currentPrice,
+            avgLongScore: results.finalDecision.avgLongScore,
+            avgShortScore: results.finalDecision.avgShortScore,
+            agentScores: results.finalDecision.agentScores,
+            message: 'Do you want to place this trade for 100X Leverage?',
+          });
+        } else {
+          this._emitWorkflow('scan', 'No signal',
+            `Avg Long: ${results.finalDecision.avgLongScore}/10 | Avg Short: ${results.finalDecision.avgShortScore}/10 | Need: ${results.finalDecision.threshold}/10 — Waiting...`);
         }
       }
 
-      // Data agent: update stats
+      // Data agent
       if (this.enabledAgents.has('data')) {
         results.data = await this.agents.data.analyze(this.activeStrategy.id);
-        this._emit('agent:update', { agent: 'data', data: results.data });
+        this._emit('agent:update', { agent: 'data', data: this._summarizeAgent('data', results.data) });
       }
 
       this.lastCycleResults = results;
     } catch (err) {
       console.error('Workflow error:', err);
-      this._emit('agent:update', { agent: 'orchestrator', error: err.message });
+      this._emitWorkflow('error', 'Workflow error', err.message);
     }
   }
 
-  async _openTrade(decision, agentResults) {
+  async _openTrade(signal) {
     try {
-      const currentPrice = (await marketService.getCurrentPrice()).price;
-
-      // Execute on exchange
-      await exchangeService.placeOrder({
-        side: decision.side,
-        size: decision.positionSize,
-        orderType: 'market',
-      });
-
-      // Log trade
+      const currentPrice = signal.entryPrice;
       const trade = await this.agents.data.logTrade(this.activeStrategy.id, {
-        side: decision.side,
+        side: signal.side,
         entry_price: currentPrice,
-        position_size: decision.positionSize,
-        leverage: this.activeStrategy.leverage,
+        position_size: 1,
+        leverage: 100,
         entry_time: new Date(),
         result: 'open',
-        agent_signals: {
-          confluence: agentResults.confluence?.proximitySignal,
-          microTrend: agentResults.microTrend?.trend,
-          macroTrend: agentResults.macroTrend?.macroTrend,
-          rsi: agentResults.rsi?.currentRSI,
-          ict: agentResults.ict?.premiumDiscount?.zone,
-          decision: decision.decision,
-          confidence: decision.confidence,
-        },
+        agent_signals: signal.agentResults || {},
       });
-
+      this.currentTrade = trade;
       this._emit('trade:update', { action: 'opened', trade });
-
-      // Update strategy PnL
-      await pool.query(
-        'UPDATE strategies SET pnl_total = pnl_total + 0 WHERE id = $1',
-        [this.activeStrategy.id]
-      );
     } catch (err) {
-      console.error('Trade execution error:', err);
+      console.error('Trade open error:', err);
+      this._emitWorkflow('error', 'Trade open failed', err.message);
     }
   }
 
   async _closeTrade(openTrade, exitResult) {
     try {
       const currentPrice = exitResult.currentPrice;
-
-      // Close on exchange
-      await exchangeService.closePosition();
-
-      // Calculate PnL
-      let pnl = exitResult.unrealizedPnl;
+      const pnl = exitResult.unrealizedPnl;
       const result = pnl >= 0 ? 'win' : 'loss';
 
-      // Update trade
       const updatedTrade = await this.agents.data.updateTrade(openTrade.id, {
         exit_price: currentPrice,
         exit_time: new Date(),
@@ -264,39 +304,105 @@ class Orchestrator {
         result,
       });
 
-      // Update strategy PnL
       await pool.query(
         'UPDATE strategies SET pnl_total = pnl_total + $1 WHERE id = $2',
         [pnl, this.activeStrategy.id]
       );
 
-      // Log to CSV
       const csvService = require('../services/csvService');
       await csvService.logTrade(this.activeStrategy.id, {
         ...updatedTrade,
         agent_signals: { exitTriggers: exitResult.triggers },
       });
 
+      this.currentTrade = null;
+      this.tradeLog.push({ result, pnl, triggers: exitResult.triggers });
+
+      if (result === 'loss') {
+        this.consecutiveLosses++;
+        this._emitWorkflow('trade', 'Trade closed - LOSS',
+          `PnL: $${pnl.toFixed(2)} | Consecutive losses: ${this.consecutiveLosses}/${this.maxConsecutiveLosses}`);
+        this._emit('session:update', { status: 'loss_update', consecutiveLosses: this.consecutiveLosses });
+
+        if (this.consecutiveLosses >= this.maxConsecutiveLosses) {
+          this._emitWorkflow('terminate', 'Strategy terminated',
+            `${this.maxConsecutiveLosses} consecutive losses reached. Bot shutting down.`);
+          await this.stopSession(`Auto-terminated: ${this.maxConsecutiveLosses} consecutive losses`);
+          return;
+        }
+      } else {
+        this.consecutiveLosses = 0;
+        this._emitWorkflow('trade', 'Trade closed - WIN',
+          `PnL: +$${pnl.toFixed(2)} | Loss streak reset`);
+        this._emit('session:update', { status: 'loss_update', consecutiveLosses: 0 });
+      }
+
       this._emit('trade:update', { action: 'closed', trade: updatedTrade, triggers: exitResult.triggers });
+      this._emitWorkflow('scan', 'Scanning for next entry', 'Looking for new signals...');
     } catch (err) {
       console.error('Trade close error:', err);
+      this._emitWorkflow('error', 'Trade close failed', err.message);
     }
   }
 
-  enableAgent(agentName) {
-    this.enabledAgents.add(agentName);
+  _summarizeAgent(name, data) {
+    switch (name) {
+      case 'confluence':
+        return {
+          signal: data.proximitySignal,
+          nearbyLevels: data.nearbyLevels?.length || 0,
+          longScore: data.longScore, shortScore: data.shortScore,
+        };
+      case 'microTrend':
+        return {
+          trend: data.trend, emaTrend: data.emaTrend, pattern: data.pattern,
+          longScore: data.longScore, shortScore: data.shortScore,
+        };
+      case 'macroTrend':
+        return {
+          trend: data.macroTrend, bias: data.directionalBias, pattern: data.pattern,
+          longScore: data.longScore, shortScore: data.shortScore,
+        };
+      case 'rsi':
+        return {
+          rsi: data.currentRSI, condition: data.condition, divLabel: data.divLabel,
+          longScore: data.longScore, shortScore: data.shortScore,
+        };
+      case 'ict':
+        return {
+          zone: data.premiumDiscount?.zone, sweeps: data.liquiditySweeps?.length || 0,
+          longScore: data.longScore, shortScore: data.shortScore,
+        };
+      case 'finalDecision':
+        return {
+          decision: data.decision, side: data.side,
+          avgLong: data.avgLongScore, avgShort: data.avgShortScore,
+          agentScores: data.agentScores,
+        };
+      case 'exit':
+        return {
+          shouldClose: data.shouldClose, triggers: data.triggers,
+          pnl: data.unrealizedPnl, elapsed: data.elapsed,
+        };
+      case 'data':
+        return {
+          totalTrades: data.totalTrades, wins: data.wins,
+          losses: data.losses, winRate: data.winRate, pnl: data.totalPnl,
+        };
+      default:
+        return data;
+    }
   }
 
-  disableAgent(agentName) {
-    this.enabledAgents.delete(agentName);
-  }
+  enableAgent(agentName) { this.enabledAgents.add(agentName); }
+  disableAgent(agentName) { this.enabledAgents.delete(agentName); }
 
   getAgentStatuses() {
     const statuses = {};
     for (const [name, agent] of Object.entries(this.agents)) {
       statuses[name] = {
         enabled: this.enabledAgents.has(name),
-        lastOutput: agent.lastOutput,
+        lastOutput: agent.lastOutput ? this._summarizeAgent(name, agent.lastOutput) : null,
       };
     }
     return statuses;
@@ -307,14 +413,22 @@ class Orchestrator {
       running: this.running,
       activeStrategy: this.activeStrategy,
       enabledAgents: [...this.enabledAgents],
-      lastCycleResults: this.lastCycleResults,
+      consecutiveLosses: this.consecutiveLosses,
+      pendingSignal: this.pendingSignal ? {
+        side: this.pendingSignal.side,
+        confidence: this.pendingSignal.confidence,
+        entryPrice: this.pendingSignal.entryPrice,
+      } : null,
+      hasPendingSignal: !!this.pendingSignal,
     };
   }
 
+  _emitWorkflow(type, title, detail) {
+    this._emit('workflow:update', { type, title, detail, timestamp: Date.now() });
+  }
+
   _emit(event, data) {
-    if (this.io) {
-      this.io.emit(event, data);
-    }
+    if (this.io) this.io.emit(event, data);
   }
 }
 
