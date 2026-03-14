@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Algomize</title>
   <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
-  <!-- Header -->
   <header>
     <div class="header-content">
       <div class="header-left">
@@ -30,11 +30,9 @@
     <div class="layout">
       <!-- Left Sidebar -->
       <aside class="sidebar">
-        <!-- Strategy Section -->
         <div class="sidebar-section">
           <div class="section-header">
-            <span class="section-icon">$</span>
-            <span>Strategy</span>
+            <span class="section-icon">$</span><span>Strategy</span>
           </div>
           <div class="strategy-create">
             <input type="text" id="strategyName" placeholder="Strategy name..." class="input-field">
@@ -43,11 +41,9 @@
           <div id="strategyList" class="strategy-list"></div>
         </div>
 
-        <!-- Bot Controls -->
         <div class="sidebar-section">
           <div class="section-header">
-            <span class="section-icon">~</span>
-            <span>Bot Control</span>
+            <span class="section-icon">~</span><span>Bot Control</span>
           </div>
           <div class="bot-status" id="botStatus">
             <span class="bot-indicator inactive"></span>
@@ -67,11 +63,9 @@
           </div>
         </div>
 
-        <!-- Performance -->
         <div class="sidebar-section">
           <div class="section-header">
-            <span class="section-icon">#</span>
-            <span>Performance</span>
+            <span class="section-icon">#</span><span>Performance</span>
           </div>
           <div class="perf-grid">
             <div class="perf-item">
@@ -93,11 +87,9 @@
           </div>
         </div>
 
-        <!-- Exchange Status -->
         <div class="sidebar-section">
           <div class="section-header">
-            <span class="section-icon">@</span>
-            <span>Exchange</span>
+            <span class="section-icon">@</span><span>Exchange</span>
           </div>
           <div id="exchangeStatus" class="exchange-info">
             <span class="exchange-badge">BloFin</span>
@@ -105,11 +97,9 @@
           </div>
         </div>
 
-        <!-- Agents -->
         <div class="sidebar-section">
           <div class="section-header">
-            <span class="section-icon">%</span>
-            <span>Agents</span>
+            <span class="section-icon">%</span><span>Agents</span>
           </div>
           <div id="agentList" class="agent-list"></div>
         </div>
@@ -117,7 +107,25 @@
 
       <!-- Main Content -->
       <div class="main-content">
-        <!-- Workflow Feed -->
+        <!-- Charts Area -->
+        <div class="charts-area">
+          <div class="chart-container">
+            <div class="chart-header">
+              <span class="chart-title">BTC/USDT — 15m</span>
+              <span class="chart-badge" id="chartUpdateTime">--</span>
+            </div>
+            <div id="priceChart" class="chart-canvas"></div>
+          </div>
+          <div class="rsi-container">
+            <div class="chart-header">
+              <span class="chart-title">RSI (14)</span>
+              <span class="chart-badge" id="rsiValue">--</span>
+            </div>
+            <div id="rsiChart" class="rsi-canvas"></div>
+          </div>
+        </div>
+
+        <!-- Workflow + Signal -->
         <div class="workflow-panel">
           <div class="panel-header">
             <span class="panel-title">&gt; Workflow</span>
@@ -130,7 +138,7 @@
           </div>
         </div>
 
-        <!-- Signal Prompt Modal -->
+        <!-- Signal Prompt -->
         <div class="signal-prompt" id="signalPrompt" style="display: none;">
           <div class="signal-header">ENTRY SIGNAL DETECTED</div>
           <div class="signal-body">
@@ -138,6 +146,7 @@
               <span class="signal-side" id="signalSide">--</span>
               <span class="signal-price">at <span id="signalPrice">--</span></span>
             </div>
+            <div class="signal-scores" id="signalScores"></div>
             <div class="signal-confidence">
               Confidence: <span id="signalConfidence">--</span>
             </div>
@@ -149,7 +158,7 @@
           </div>
         </div>
 
-        <!-- Recent Trades -->
+        <!-- Trade Log -->
         <div class="trades-panel">
           <div class="panel-header">
             <span class="panel-title"># Trade Log</span>
@@ -158,13 +167,7 @@
             <table class="trades-table">
               <thead>
                 <tr>
-                  <th>ID</th>
-                  <th>Side</th>
-                  <th>Entry</th>
-                  <th>Exit</th>
-                  <th>PnL</th>
-                  <th>Result</th>
-                  <th>Time</th>
+                  <th>ID</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Result</th><th>Time</th>
                 </tr>
               </thead>
               <tbody id="tradesBody"></tbody>

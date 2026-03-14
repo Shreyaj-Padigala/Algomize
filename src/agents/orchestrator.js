@@ -68,14 +68,11 @@ class Orchestrator {
 
     this.running = true;
     this._emit('session:update', { status: 'started', strategyId, sessionId: session.rows[0].id });
-
     this._emitWorkflow('system', 'Bot started', `Strategy: ${this.activeStrategy.name} | Looking for entry signals...`);
 
-    // Start workflow loop (every 60 seconds)
     this.workflowInterval = setInterval(() => this._runWorkflow(), 60000);
     this._runWorkflow();
 
-    // Session timer (12 hours)
     const durationMs = 12 * 60 * 60 * 1000;
     this.sessionTimer = setTimeout(() => this.stopSession('Session duration limit reached'), durationMs);
 
@@ -105,7 +102,6 @@ class Orchestrator {
     return { status: 'stopped', reason };
   }
 
-  // User confirms or rejects a trade signal from the frontend
   async handleSignalResponse(accepted) {
     if (!this.pendingSignal) return { error: 'No pending signal' };
 
@@ -131,20 +127,24 @@ class Orchestrator {
       const candles1h = await marketService.getCandles('1h', 200);
       const currentPrice = candles15m[candles15m.length - 1].close;
 
-      const results = {};
+      // Send chart data to frontend
+      this._emit('chart:data', {
+        candles15m: candles15m.slice(-192), // ~2 days of 15m candles
+        candles1h: candles1h.slice(-48),    // 2 days of 1h candles
+      });
 
-      // Run analysis agents
+      const results = {};
       const agentTasks = [];
 
-      if (this.enabledAgents.has('confluence')) {
+      if (this.enabledAgents.has('rsi')) {
         agentTasks.push(
-          this.agents.confluence.analyze(candles15m, candles1h).then(r => {
-            results.confluence = r;
-            this._emitWorkflow('agent', 'Confluence',
-              r.proximitySignal === 'near_key_level'
-                ? `Near key level | ${r.nearbyLevels.length} nearby levels`
-                : 'In open space - no key levels nearby');
-            this._emit('agent:update', { agent: 'confluence', data: this._summarizeAgent('confluence', r) });
+          this.agents.rsi.analyze(candles15m).then(r => {
+            results.rsi = r;
+            this._emitWorkflow('agent', 'RSI',
+              `RSI: ${r.currentRSI}, ${r.divLabel} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+            this._emit('agent:update', { agent: 'rsi', data: this._summarizeAgent('rsi', r) });
+            // Send RSI data for chart
+            this._emit('rsi:data', { values: r.rsiHistory, current: r.currentRSI });
           })
         );
       }
@@ -154,7 +154,7 @@ class Orchestrator {
           this.agents.microTrend.analyze(candles15m).then(r => {
             results.microTrend = r;
             this._emitWorkflow('agent', 'Micro Trend (15m)',
-              `Trend: ${r.trend} | EMA: ${r.emaTrend} | BOS: ${r.bos ? r.bos.type : 'none'}`);
+              `${r.pattern || r.trend} | EMA: ${r.emaTrend} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
             this._emit('agent:update', { agent: 'microTrend', data: this._summarizeAgent('microTrend', r) });
           })
         );
@@ -165,19 +165,19 @@ class Orchestrator {
           this.agents.macroTrend.analyze(candles1h).then(r => {
             results.macroTrend = r;
             this._emitWorkflow('agent', 'Macro Trend (1h)',
-              `Trend: ${r.macroTrend} | Structure: ${r.structureTrend} | Bias: ${r.directionalBias}`);
+              `${r.pattern || r.macroTrend} | Bias: ${r.directionalBias} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
             this._emit('agent:update', { agent: 'macroTrend', data: this._summarizeAgent('macroTrend', r) });
           })
         );
       }
 
-      if (this.enabledAgents.has('rsi')) {
+      if (this.enabledAgents.has('confluence')) {
         agentTasks.push(
-          this.agents.rsi.analyze(candles15m).then(r => {
-            results.rsi = r;
-            this._emitWorkflow('agent', 'RSI',
-              `RSI: ${r.currentRSI} | ${r.condition} | Bull Div: ${r.bullishDivergence} | Bear Div: ${r.bearishDivergence}`);
-            this._emit('agent:update', { agent: 'rsi', data: this._summarizeAgent('rsi', r) });
+          this.agents.confluence.analyze(candles15m, candles1h).then(r => {
+            results.confluence = r;
+            this._emitWorkflow('agent', 'Confluence',
+              `${r.proximitySignal === 'near_key_level' ? `Near key level (${r.nearbyLevels.length})` : 'Open space'} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+            this._emit('agent:update', { agent: 'confluence', data: this._summarizeAgent('confluence', r) });
           })
         );
       }
@@ -187,7 +187,7 @@ class Orchestrator {
           this.agents.ict.analyze(candles15m, candles1h).then(r => {
             results.ict = r;
             this._emitWorkflow('agent', 'ICT',
-              `Zone: ${r.premiumDiscount?.zone || 'n/a'} | Sweeps: ${r.liquiditySweeps?.length || 0} | FVGs: ${r.fairValueGaps?.['15m']?.length || 0}`);
+              `Zone: ${r.premiumDiscount?.zone || 'n/a'} | Sweeps: ${r.liquiditySweeps?.length || 0} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
             this._emit('agent:update', { agent: 'ict', data: this._summarizeAgent('ict', r) });
           })
         );
@@ -229,43 +229,36 @@ class Orchestrator {
           macroTrend: results.macroTrend,
           rsi: results.rsi,
           ict: results.ict,
-          strategyRules: this.activeStrategy.rules || {},
         });
         this._emit('agent:update', { agent: 'finalDecision', data: this._summarizeAgent('finalDecision', results.finalDecision) });
 
         if (results.finalDecision.decision !== 'no_trade') {
-          this._emitWorkflow('signal', 'Entry signal detected',
-            `${results.finalDecision.side.toUpperCase()} | Confidence: ${(results.finalDecision.confidence * 100).toFixed(0)}% | Bull: ${results.finalDecision.bullishScore} Bear: ${results.finalDecision.bearishScore}`);
+          this._emitWorkflow('signal', 'ENTRY SIGNAL',
+            `${results.finalDecision.side === 'buy' ? 'LONG' : 'SHORT'} 100X | Avg Long: ${results.finalDecision.avgLongScore}/10 | Avg Short: ${results.finalDecision.avgShortScore}/10`);
 
-          // Store pending signal and notify user
           this.pendingSignal = {
             ...results.finalDecision,
             entryPrice: currentPrice,
             timestamp: Date.now(),
-            agentResults: {
-              confluence: results.confluence?.proximitySignal,
-              microTrend: results.microTrend?.trend,
-              macroTrend: results.macroTrend?.macroTrend,
-              rsi: results.rsi?.currentRSI,
-              ict: results.ict?.premiumDiscount?.zone,
-            },
+            agentResults: results.finalDecision.agentScores,
           };
 
           this._emit('signal:prompt', {
             side: results.finalDecision.side,
             confidence: results.finalDecision.confidence,
             entryPrice: currentPrice,
-            bullishScore: results.finalDecision.bullishScore,
-            bearishScore: results.finalDecision.bearishScore,
+            avgLongScore: results.finalDecision.avgLongScore,
+            avgShortScore: results.finalDecision.avgShortScore,
+            agentScores: results.finalDecision.agentScores,
             message: 'Do you want to place this trade for 100X Leverage?',
           });
         } else {
           this._emitWorkflow('scan', 'No signal',
-            `Bull: ${results.finalDecision.bullishScore} | Bear: ${results.finalDecision.bearishScore} | Threshold: ${results.finalDecision.threshold} — Waiting...`);
+            `Avg Long: ${results.finalDecision.avgLongScore}/10 | Avg Short: ${results.finalDecision.avgShortScore}/10 | Need: ${results.finalDecision.threshold}/10 — Waiting...`);
         }
       }
 
-      // Data agent: update stats
+      // Data agent
       if (this.enabledAgents.has('data')) {
         results.data = await this.agents.data.analyze(this.activeStrategy.id);
         this._emit('agent:update', { agent: 'data', data: this._summarizeAgent('data', results.data) });
@@ -281,8 +274,6 @@ class Orchestrator {
   async _openTrade(signal) {
     try {
       const currentPrice = signal.entryPrice;
-
-      // Log trade (no exchange execution - notification only)
       const trade = await this.agents.data.logTrade(this.activeStrategy.id, {
         side: signal.side,
         entry_price: currentPrice,
@@ -292,7 +283,6 @@ class Orchestrator {
         result: 'open',
         agent_signals: signal.agentResults || {},
       });
-
       this.currentTrade = trade;
       this._emit('trade:update', { action: 'opened', trade });
     } catch (err) {
@@ -328,11 +318,11 @@ class Orchestrator {
       this.currentTrade = null;
       this.tradeLog.push({ result, pnl, triggers: exitResult.triggers });
 
-      // Track consecutive losses
       if (result === 'loss') {
         this.consecutiveLosses++;
         this._emitWorkflow('trade', 'Trade closed - LOSS',
           `PnL: $${pnl.toFixed(2)} | Consecutive losses: ${this.consecutiveLosses}/${this.maxConsecutiveLosses}`);
+        this._emit('session:update', { status: 'loss_update', consecutiveLosses: this.consecutiveLosses });
 
         if (this.consecutiveLosses >= this.maxConsecutiveLosses) {
           this._emitWorkflow('terminate', 'Strategy terminated',
@@ -344,6 +334,7 @@ class Orchestrator {
         this.consecutiveLosses = 0;
         this._emitWorkflow('trade', 'Trade closed - WIN',
           `PnL: +$${pnl.toFixed(2)} | Loss streak reset`);
+        this._emit('session:update', { status: 'loss_update', consecutiveLosses: 0 });
       }
 
       this._emit('trade:update', { action: 'closed', trade: updatedTrade, triggers: exitResult.triggers });
@@ -355,68 +346,56 @@ class Orchestrator {
   }
 
   _summarizeAgent(name, data) {
-    // Return a clean summary instead of raw data
     switch (name) {
       case 'confluence':
         return {
           signal: data.proximitySignal,
           nearbyLevels: data.nearbyLevels?.length || 0,
-          supports: data.supportLevels?.length || 0,
-          resistances: data.resistanceLevels?.length || 0,
+          longScore: data.longScore, shortScore: data.shortScore,
         };
       case 'microTrend':
-        return { trend: data.trend, emaTrend: data.emaTrend, bos: data.bos?.type || 'none' };
+        return {
+          trend: data.trend, emaTrend: data.emaTrend, pattern: data.pattern,
+          longScore: data.longScore, shortScore: data.shortScore,
+        };
       case 'macroTrend':
-        return { trend: data.macroTrend, structure: data.structureTrend, bias: data.directionalBias };
+        return {
+          trend: data.macroTrend, bias: data.directionalBias, pattern: data.pattern,
+          longScore: data.longScore, shortScore: data.shortScore,
+        };
       case 'rsi':
         return {
-          rsi: data.currentRSI,
-          condition: data.condition,
-          bullDiv: data.bullishDivergence,
-          bearDiv: data.bearishDivergence,
+          rsi: data.currentRSI, condition: data.condition, divLabel: data.divLabel,
+          longScore: data.longScore, shortScore: data.shortScore,
         };
       case 'ict':
         return {
-          zone: data.premiumDiscount?.zone,
-          sweeps: data.liquiditySweeps?.length || 0,
-          fvgs: data.fairValueGaps?.['15m']?.length || 0,
-          orderBlocks: data.orderBlocks?.length || 0,
+          zone: data.premiumDiscount?.zone, sweeps: data.liquiditySweeps?.length || 0,
+          longScore: data.longScore, shortScore: data.shortScore,
         };
       case 'finalDecision':
         return {
-          decision: data.decision,
-          side: data.side,
-          confidence: data.confidence,
-          bullish: data.bullishScore,
-          bearish: data.bearishScore,
+          decision: data.decision, side: data.side,
+          avgLong: data.avgLongScore, avgShort: data.avgShortScore,
+          agentScores: data.agentScores,
         };
       case 'exit':
         return {
-          shouldClose: data.shouldClose,
-          triggers: data.triggers,
-          pnl: data.unrealizedPnl,
-          elapsed: data.elapsed,
+          shouldClose: data.shouldClose, triggers: data.triggers,
+          pnl: data.unrealizedPnl, elapsed: data.elapsed,
         };
       case 'data':
         return {
-          totalTrades: data.totalTrades,
-          wins: data.wins,
-          losses: data.losses,
-          winRate: data.winRate,
-          pnl: data.totalPnl,
+          totalTrades: data.totalTrades, wins: data.wins,
+          losses: data.losses, winRate: data.winRate, pnl: data.totalPnl,
         };
       default:
         return data;
     }
   }
 
-  enableAgent(agentName) {
-    this.enabledAgents.add(agentName);
-  }
-
-  disableAgent(agentName) {
-    this.enabledAgents.delete(agentName);
-  }
+  enableAgent(agentName) { this.enabledAgents.add(agentName); }
+  disableAgent(agentName) { this.enabledAgents.delete(agentName); }
 
   getAgentStatuses() {
     const statuses = {};
@@ -445,18 +424,11 @@ class Orchestrator {
   }
 
   _emitWorkflow(type, title, detail) {
-    this._emit('workflow:update', {
-      type,
-      title,
-      detail,
-      timestamp: Date.now(),
-    });
+    this._emit('workflow:update', { type, title, detail, timestamp: Date.now() });
   }
 
   _emit(event, data) {
-    if (this.io) {
-      this.io.emit(event, data);
-    }
+    if (this.io) this.io.emit(event, data);
   }
 }
 

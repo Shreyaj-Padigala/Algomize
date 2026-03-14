@@ -475,6 +475,85 @@ main {
   overflow: hidden;
 }
 
+/* Charts */
+.charts-area {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+}
+
+.chart-container {
+  height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.rsi-container {
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.chart-title {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chart-badge {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.chart-canvas {
+  flex: 1;
+  background: var(--bg-primary);
+}
+
+.rsi-canvas {
+  flex: 1;
+  background: var(--bg-primary);
+}
+
+/* Signal Scores */
+.signal-scores {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+  font-size: 11px;
+}
+
+.score-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(35, 53, 84, 0.3);
+}
+
+.score-agent {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.score-values {
+  display: flex;
+  gap: 12px;
+}
+
+.score-long { color: var(--success); }
+.score-short { color: var(--danger); }
+
 /* Workflow Panel */
 .workflow-panel {
   flex: 1;
@@ -482,6 +561,7 @@ main {
   flex-direction: column;
   border-bottom: 1px solid var(--border);
   overflow: hidden;
+  min-height: 150px;
 }
 
 .panel-header {

@@ -6,8 +6,12 @@ let strategies = [];
 let selectedStrategyId = null;
 let sessionRunning = false;
 let workflowCount = 0;
+let priceChart = null;
+let candleSeries = null;
+let rsiChart = null;
+let rsiSeries = null;
 
-// DOM Elements
+// DOM
 const els = {
   currentPrice: document.getElementById('currentPrice'),
   connectionDot: document.getElementById('connectionDot'),
@@ -30,6 +34,7 @@ const els = {
   signalSide: document.getElementById('signalSide'),
   signalPrice: document.getElementById('signalPrice'),
   signalConfidence: document.getElementById('signalConfidence'),
+  signalScores: document.getElementById('signalScores'),
   btnAcceptSignal: document.getElementById('btnAcceptSignal'),
   btnRejectSignal: document.getElementById('btnRejectSignal'),
   exchangeState: document.getElementById('exchangeState'),
@@ -37,9 +42,216 @@ const els = {
   loss1: document.getElementById('loss1'),
   loss2: document.getElementById('loss2'),
   loss3: document.getElementById('loss3'),
+  chartUpdateTime: document.getElementById('chartUpdateTime'),
+  rsiValue: document.getElementById('rsiValue'),
 };
 
-// API helper
+// ---------- Cash Register Sound ----------
+function playCashRegister() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // Ka-ching! sound: short metallic hit + bell ring
+    const now = ctx.currentTime;
+
+    // Hit sound
+    const hitOsc = ctx.createOscillator();
+    const hitGain = ctx.createGain();
+    hitOsc.type = 'square';
+    hitOsc.frequency.setValueAtTime(800, now);
+    hitOsc.frequency.exponentialRampToValueAtTime(200, now + 0.05);
+    hitGain.gain.setValueAtTime(0.3, now);
+    hitGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+    hitOsc.connect(hitGain).connect(ctx.destination);
+    hitOsc.start(now);
+    hitOsc.stop(now + 0.1);
+
+    // Bell ring 1
+    const bell1 = ctx.createOscillator();
+    const bell1Gain = ctx.createGain();
+    bell1.type = 'sine';
+    bell1.frequency.setValueAtTime(2000, now + 0.05);
+    bell1Gain.gain.setValueAtTime(0.2, now + 0.05);
+    bell1Gain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+    bell1.connect(bell1Gain).connect(ctx.destination);
+    bell1.start(now + 0.05);
+    bell1.stop(now + 0.6);
+
+    // Bell ring 2 (higher)
+    const bell2 = ctx.createOscillator();
+    const bell2Gain = ctx.createGain();
+    bell2.type = 'sine';
+    bell2.frequency.setValueAtTime(2500, now + 0.15);
+    bell2Gain.gain.setValueAtTime(0.15, now + 0.15);
+    bell2Gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+    bell2.connect(bell2Gain).connect(ctx.destination);
+    bell2.start(now + 0.15);
+    bell2.stop(now + 0.8);
+
+    // Bell ring 3 (highest - the ching!)
+    const bell3 = ctx.createOscillator();
+    const bell3Gain = ctx.createGain();
+    bell3.type = 'sine';
+    bell3.frequency.setValueAtTime(3200, now + 0.25);
+    bell3Gain.gain.setValueAtTime(0.2, now + 0.25);
+    bell3Gain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+    bell3.connect(bell3Gain).connect(ctx.destination);
+    bell3.start(now + 0.25);
+    bell3.stop(now + 1.2);
+
+    setTimeout(() => ctx.close(), 2000);
+  } catch (e) {
+    // AudioContext not available
+  }
+}
+
+// ---------- Charts ----------
+function initCharts() {
+  const chartColors = {
+    background: '#1a1a2e',
+    textColor: '#7f8c8d',
+    gridColor: 'rgba(35, 53, 84, 0.3)',
+  };
+
+  // Price chart
+  const priceContainer = document.getElementById('priceChart');
+  priceChart = LightweightCharts.createChart(priceContainer, {
+    width: priceContainer.clientWidth,
+    height: priceContainer.clientHeight,
+    layout: {
+      background: { type: 'solid', color: chartColors.background },
+      textColor: chartColors.textColor,
+      fontSize: 10,
+    },
+    grid: {
+      vertLines: { color: chartColors.gridColor },
+      horzLines: { color: chartColors.gridColor },
+    },
+    crosshair: { mode: 0 },
+    rightPriceScale: { borderColor: '#233554' },
+    timeScale: {
+      borderColor: '#233554',
+      timeVisible: true,
+      secondsVisible: false,
+    },
+  });
+
+  candleSeries = priceChart.addCandlestickSeries({
+    upColor: '#00d2ff',
+    downColor: '#e94560',
+    borderUpColor: '#00d2ff',
+    borderDownColor: '#e94560',
+    wickUpColor: '#00d2ff',
+    wickDownColor: '#e94560',
+  });
+
+  // RSI chart
+  const rsiContainer = document.getElementById('rsiChart');
+  rsiChart = LightweightCharts.createChart(rsiContainer, {
+    width: rsiContainer.clientWidth,
+    height: rsiContainer.clientHeight,
+    layout: {
+      background: { type: 'solid', color: chartColors.background },
+      textColor: chartColors.textColor,
+      fontSize: 10,
+    },
+    grid: {
+      vertLines: { color: chartColors.gridColor },
+      horzLines: { color: chartColors.gridColor },
+    },
+    crosshair: { mode: 0 },
+    rightPriceScale: {
+      borderColor: '#233554',
+      scaleMargins: { top: 0.1, bottom: 0.1 },
+    },
+    timeScale: {
+      borderColor: '#233554',
+      timeVisible: true,
+      visible: false,
+    },
+  });
+
+  rsiSeries = rsiChart.addLineSeries({
+    color: '#f39c12',
+    lineWidth: 2,
+    priceFormat: { type: 'custom', formatter: v => v.toFixed(1) },
+  });
+
+  // Overbought/oversold lines
+  const obLine = rsiChart.addLineSeries({
+    color: 'rgba(233, 69, 96, 0.4)',
+    lineWidth: 1,
+    lineStyle: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+  });
+  const osLine = rsiChart.addLineSeries({
+    color: 'rgba(0, 210, 255, 0.4)',
+    lineWidth: 1,
+    lineStyle: 2,
+    priceLineVisible: false,
+    lastValueVisible: false,
+  });
+
+  // Store for reference lines
+  window._rsiRefLines = { obLine, osLine };
+
+  // Sync time scales
+  priceChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+    if (range) rsiChart.timeScale().setVisibleLogicalRange(range);
+  });
+
+  // Resize handler
+  const resizeObserver = new ResizeObserver(() => {
+    priceChart.applyOptions({ width: priceContainer.clientWidth, height: priceContainer.clientHeight });
+    rsiChart.applyOptions({ width: rsiContainer.clientWidth, height: rsiContainer.clientHeight });
+  });
+  resizeObserver.observe(priceContainer);
+  resizeObserver.observe(rsiContainer);
+}
+
+function updateCharts(candles15m) {
+  if (!candleSeries || !candles15m || candles15m.length === 0) return;
+
+  const candleData = candles15m.map(c => ({
+    time: Math.floor(c.timestamp / 1000),
+    open: c.open,
+    high: c.high,
+    low: c.low,
+    close: c.close,
+  }));
+
+  candleSeries.setData(candleData);
+  els.chartUpdateTime.textContent = new Date().toLocaleTimeString();
+}
+
+function updateRsiChart(candles15m, rsiValues) {
+  if (!rsiSeries || !rsiValues || rsiValues.length === 0) return;
+
+  // RSI values start at index 14 (period offset)
+  const offset = candles15m.length - rsiValues.length;
+  const rsiData = rsiValues.map((v, i) => ({
+    time: Math.floor(candles15m[i + offset].timestamp / 1000),
+    value: v,
+  }));
+
+  rsiSeries.setData(rsiData);
+
+  // Reference lines
+  if (window._rsiRefLines && rsiData.length > 1) {
+    const times = [rsiData[0].time, rsiData[rsiData.length - 1].time];
+    window._rsiRefLines.obLine.setData(times.map(t => ({ time: t, value: 70 })));
+    window._rsiRefLines.osLine.setData(times.map(t => ({ time: t, value: 30 })));
+  }
+
+  if (rsiValues.length > 0) {
+    const current = rsiValues[rsiValues.length - 1];
+    els.rsiValue.textContent = current.toFixed(1);
+    els.rsiValue.style.color = current >= 70 ? 'var(--danger)' : current <= 30 ? 'var(--success)' : 'var(--text-dim)';
+  }
+}
+
+// ---------- API ----------
 async function api(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -48,7 +260,7 @@ async function api(path, options = {}) {
   return res.json();
 }
 
-// Socket events
+// ---------- Socket Events ----------
 socket.on('connect', () => {
   updateConnectionStatus(true);
   socket.emit('market:subscribe');
@@ -60,9 +272,24 @@ socket.on('market:update', (data) => {
   els.currentPrice.textContent = `$${parseFloat(data.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 });
 
-socket.on('agent:update', (data) => {
-  loadAgentStatuses();
+socket.on('chart:data', (data) => {
+  if (data.candles15m) {
+    updateCharts(data.candles15m);
+    // Calculate RSI for chart
+    const closes = data.candles15m.map(c => c.close);
+    // Simple RSI calc for chart (matches server)
+    const rsiValues = calcRSI(closes, 14);
+    updateRsiChart(data.candles15m, rsiValues);
+  }
 });
+
+socket.on('rsi:data', (data) => {
+  if (data.current) {
+    els.rsiValue.textContent = data.current.toFixed(1);
+  }
+});
+
+socket.on('agent:update', () => loadAgentStatuses());
 
 socket.on('trade:update', () => {
   loadRecentTrades();
@@ -76,6 +303,8 @@ socket.on('session:update', (data) => {
     els.sessionStatus.style.color = 'var(--success)';
     setBotIndicator(true);
     clearWorkflow();
+  } else if (data.status === 'loss_update') {
+    updateLossDots(data.consecutiveLosses || 0);
   } else {
     sessionRunning = false;
     els.sessionStatus.textContent = data.reason || 'Stopped';
@@ -84,18 +313,38 @@ socket.on('session:update', (data) => {
     els.signalPrompt.style.display = 'none';
   }
   updateSessionButtons();
-  updateLossDots(0);
 });
 
-socket.on('workflow:update', (data) => {
-  addWorkflowEntry(data);
-});
+socket.on('workflow:update', (data) => addWorkflowEntry(data));
 
 socket.on('signal:prompt', (data) => {
+  playCashRegister();
   showSignalPrompt(data);
 });
 
-// Connection status
+// ---------- Client-side RSI calculation (for chart) ----------
+function calcRSI(closes, period) {
+  if (closes.length < period + 1) return [];
+  const rsi = [];
+  const gains = [], losses = [];
+  for (let i = 1; i <= period; i++) {
+    const ch = closes[i] - closes[i - 1];
+    gains.push(ch > 0 ? ch : 0);
+    losses.push(ch < 0 ? Math.abs(ch) : 0);
+  }
+  let avgG = gains.reduce((s, g) => s + g, 0) / period;
+  let avgL = losses.reduce((s, l) => s + l, 0) / period;
+  rsi.push(100 - 100 / (1 + (avgL === 0 ? 100 : avgG / avgL)));
+  for (let i = period + 1; i < closes.length; i++) {
+    const ch = closes[i] - closes[i - 1];
+    avgG = (avgG * (period - 1) + (ch > 0 ? ch : 0)) / period;
+    avgL = (avgL * (period - 1) + (ch < 0 ? Math.abs(ch) : 0)) / period;
+    rsi.push(100 - 100 / (1 + (avgL === 0 ? 100 : avgG / avgL)));
+  }
+  return rsi;
+}
+
+// ---------- UI Helpers ----------
 function updateConnectionStatus(connected) {
   els.connectionDot.className = `connection-dot ${connected ? 'connected' : ''}`;
   els.statusText.textContent = connected ? 'Connected' : 'Disconnected';
@@ -111,17 +360,10 @@ function updateSessionButtons() {
   els.btnStopSession.disabled = !sessionRunning;
 }
 
-// Workflow feed
+// Workflow
 const WF_ICONS = {
-  scan: '~',
-  agent: '>',
-  signal: '!',
-  trade: '$',
-  exit: 'x',
-  holding: '=',
-  system: '*',
-  error: '!',
-  terminate: 'X',
+  scan: '~', agent: '>', signal: '!', trade: '$',
+  exit: 'x', holding: '=', system: '*', error: '!', terminate: 'X',
 };
 
 function clearWorkflow() {
@@ -131,32 +373,32 @@ function clearWorkflow() {
 }
 
 function addWorkflowEntry(data) {
-  // Remove empty state if present
   const empty = els.workflowFeed.querySelector('.workflow-empty');
   if (empty) empty.remove();
-
   workflowCount++;
   els.workflowCount.textContent = `${workflowCount} events`;
 
   const time = new Date(data.timestamp).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  const icon = WF_ICONS[data.type] || '>';
-
   const entry = document.createElement('div');
   entry.className = 'wf-entry';
   entry.innerHTML = `
     <span class="wf-time">${time}</span>
-    <span class="wf-icon ${data.type}">${icon}</span>
+    <span class="wf-icon ${data.type}">${WF_ICONS[data.type] || '>'}</span>
     <div class="wf-body">
       <span class="wf-title">${data.title}</span>
       <div class="wf-detail">${data.detail}</div>
     </div>
   `;
-
   els.workflowFeed.appendChild(entry);
   els.workflowFeed.scrollTop = els.workflowFeed.scrollHeight;
 }
 
 // Signal prompt
+const AGENT_LABELS = {
+  confluence: 'Confluence', microTrend: 'Micro Trend', macroTrend: 'Macro Trend',
+  rsi: 'RSI', ict: 'ICT',
+};
+
 function showSignalPrompt(data) {
   els.signalPrompt.style.display = 'block';
   els.signalSide.textContent = data.side === 'buy' ? 'LONG' : 'SHORT';
@@ -164,7 +406,27 @@ function showSignalPrompt(data) {
   els.signalPrice.textContent = `$${parseFloat(data.entryPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
   els.signalConfidence.textContent = `${(data.confidence * 100).toFixed(0)}%`;
 
-  // Scroll to signal
+  // Show per-agent scores
+  if (data.agentScores) {
+    els.signalScores.innerHTML = Object.entries(data.agentScores).map(([name, s]) => `
+      <div class="score-row">
+        <span class="score-agent">${AGENT_LABELS[name] || name}</span>
+        <span class="score-values">
+          <span class="score-long">${s.longScore}/10 Long</span>
+          <span class="score-short">${s.shortScore}/10 Short</span>
+        </span>
+      </div>
+    `).join('') + `
+      <div class="score-row" style="border-top: 1px solid var(--border); padding-top: 4px; margin-top: 4px;">
+        <span class="score-agent" style="color: var(--text-primary);">Average</span>
+        <span class="score-values">
+          <span class="score-long">${data.avgLongScore}/10 Long</span>
+          <span class="score-short">${data.avgShortScore}/10 Short</span>
+        </span>
+      </div>
+    `;
+  }
+
   els.signalPrompt.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -202,7 +464,6 @@ function renderStrategies() {
     els.strategyList.innerHTML = '<div style="color: var(--text-dim); font-size: 11px; padding: 4px;">No strategies yet</div>';
     return;
   }
-
   els.strategyList.innerHTML = strategies.map((s) => `
     <div class="strategy-item ${selectedStrategyId === s.id ? 'selected' : ''}" onclick="selectStrategy(${s.id})">
       <div>
@@ -226,12 +487,10 @@ function selectStrategy(id) {
 els.btnCreateStrategy.addEventListener('click', async () => {
   const name = els.strategyName.value.trim();
   if (!name) return;
-
   await api('/api/strategies', {
     method: 'POST',
     body: JSON.stringify({ name, leverage: 100 }),
   });
-
   els.strategyName.value = '';
   loadStrategies();
 });
@@ -242,7 +501,7 @@ async function deleteStrategy(id) {
   loadStrategies();
 }
 
-// Session controls
+// Session
 els.btnStartSession.addEventListener('click', async () => {
   if (!selectedStrategyId) return;
   try {
@@ -264,27 +523,25 @@ els.btnStopSession.addEventListener('click', async () => {
 
 // Agents
 const AGENT_NAMES = ['confluence', 'microTrend', 'macroTrend', 'rsi', 'ict', 'finalDecision', 'exit', 'data'];
-const AGENT_LABELS = {
-  confluence: 'Confluence',
-  microTrend: 'Micro Trend',
-  macroTrend: 'Macro Trend',
-  rsi: 'RSI',
-  ict: 'ICT',
-  finalDecision: 'Decision',
-  exit: 'Exit',
-  data: 'Data',
+const AGENT_LABELS_FULL = {
+  confluence: 'Confluence', microTrend: 'Micro Trend', macroTrend: 'Macro Trend',
+  rsi: 'RSI', ict: 'ICT', finalDecision: 'Decision', exit: 'Exit', data: 'Data',
 };
 
 function renderAgents(statuses) {
   els.agentList.innerHTML = AGENT_NAMES.map((name) => {
     const status = statuses?.[name];
     const hasOutput = !!status?.lastOutput;
-    const badgeClass = hasOutput ? 'active' : 'idle';
-    const badgeText = hasOutput ? 'active' : 'idle';
+    const lo = status?.lastOutput;
+    let scoreText = '';
+    if (hasOutput && lo?.longScore !== undefined) {
+      scoreText = `${lo.longScore}L/${lo.shortScore}S`;
+    }
     return `
       <div class="agent-row">
-        <span class="agent-name">${AGENT_LABELS[name]}</span>
-        <span class="agent-badge ${badgeClass}">${badgeText}</span>
+        <span class="agent-name">${AGENT_LABELS_FULL[name]}</span>
+        ${scoreText ? `<span class="agent-badge active">${scoreText}</span>` :
+          `<span class="agent-badge ${hasOutput ? 'active' : 'idle'}">${hasOutput ? 'active' : 'idle'}</span>`}
       </div>
     `;
   }).join('');
@@ -309,7 +566,7 @@ async function loadPerformance() {
   } catch (e) {}
 }
 
-// Recent trades
+// Trades
 async function loadRecentTrades() {
   try {
     const trades = await api('/api/dashboard/trades');
@@ -331,7 +588,6 @@ async function loadRecentTrades() {
   } catch (e) {}
 }
 
-// Dashboard summary
 async function loadDashboardSummary() {
   try {
     const summary = await api('/api/dashboard/summary');
@@ -340,7 +596,6 @@ async function loadDashboardSummary() {
   } catch (e) {}
 }
 
-// Check exchange status
 async function checkExchange() {
   try {
     const result = await api('/api/exchange/status');
@@ -351,7 +606,6 @@ async function checkExchange() {
   }
 }
 
-// Session status
 async function checkSessionStatus() {
   try {
     const status = await api('/api/session/status');
@@ -361,15 +615,34 @@ async function checkSessionStatus() {
       els.sessionStatus.style.color = 'var(--success)';
       setBotIndicator(true);
     }
-    if (status.consecutiveLosses !== undefined) {
-      updateLossDots(status.consecutiveLosses);
-    }
+    if (status.consecutiveLosses !== undefined) updateLossDots(status.consecutiveLosses);
     updateSessionButtons();
   } catch (e) {}
 }
 
+// Load initial chart data
+async function loadInitialChartData() {
+  try {
+    const data = await api('/api/chart/btcusdt/15m');
+    if (data.candles) {
+      updateCharts(data.candles);
+      if (data.rsi) {
+        updateRsiChart(data.candles, data.rsi);
+      } else {
+        const closes = data.candles.map(c => c.close);
+        const rsi = calcRSI(closes, 14);
+        updateRsiChart(data.candles, rsi);
+      }
+    }
+  } catch (e) {
+    console.log('Chart data not available yet');
+  }
+}
+
 // Init
 async function init() {
+  initCharts();
+
   await loadStrategies();
   await loadAgentStatuses();
   await loadRecentTrades();
@@ -377,8 +650,8 @@ async function init() {
   await checkSessionStatus();
   await loadDashboardSummary();
   await checkExchange();
+  await loadInitialChartData();
 
-  // Auto-connect exchange from .env
   api('/api/exchange/connect', { method: 'POST' }).then(() => checkExchange());
 
   setInterval(loadAgentStatuses, 30000);
@@ -386,6 +659,7 @@ async function init() {
   setInterval(loadPerformance, 30000);
   setInterval(loadDashboardSummary, 30000);
   setInterval(checkExchange, 60000);
+  setInterval(loadInitialChartData, 60000); // Refresh chart every minute
 }
 
 init();

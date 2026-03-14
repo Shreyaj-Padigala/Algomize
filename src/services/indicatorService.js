@@ -350,6 +350,100 @@ class IndicatorService {
       zone: currentPrice > mid ? 'premium' : 'discount',
     };
   }
+
+  /**
+   * Generate an ASCII chart representation of candle data for AI pattern reading.
+   * Uses recent candles to create a visual chart that can be interpreted by LLM.
+   * @param {Array} candles - OHLCV candle data
+   * @param {number} count - Number of candles to include
+   * @param {number} height - Chart height in rows
+   * @returns {string} ASCII chart
+   */
+  generateAsciiChart(candles, count = 48, height = 20) {
+    const recent = candles.slice(-count);
+    if (recent.length < 5) return 'Insufficient data';
+
+    const closes = recent.map(c => c.close);
+    const highs = recent.map(c => c.high);
+    const lows = recent.map(c => c.low);
+    const allPrices = [...highs, ...lows];
+    const maxPrice = Math.max(...allPrices);
+    const minPrice = Math.min(...allPrices);
+    const range = maxPrice - minPrice || 1;
+
+    const lines = [];
+
+    // Build rows top to bottom
+    for (let row = 0; row < height; row++) {
+      const priceAtRow = maxPrice - (row / (height - 1)) * range;
+      let line = '';
+
+      for (let col = 0; col < recent.length; col++) {
+        const c = recent[col];
+        const high = c.high;
+        const low = c.low;
+        const open = c.open;
+        const close = c.close;
+
+        const highRow = Math.round((maxPrice - high) / range * (height - 1));
+        const lowRow = Math.round((maxPrice - low) / range * (height - 1));
+        const bodyTop = Math.round((maxPrice - Math.max(open, close)) / range * (height - 1));
+        const bodyBot = Math.round((maxPrice - Math.min(open, close)) / range * (height - 1));
+
+        if (row >= bodyTop && row <= bodyBot) {
+          line += close >= open ? '+' : '#'; // + = green candle, # = red candle
+        } else if (row >= highRow && row <= lowRow) {
+          line += '|'; // wick
+        } else {
+          line += ' ';
+        }
+      }
+
+      const priceLabel = priceAtRow.toFixed(0).padStart(7);
+      lines.push(`${priceLabel} |${line}`);
+    }
+
+    // Add time axis
+    const timeAxis = '        ' + recent.map((c, i) => {
+      if (i % 12 === 0) return '^';
+      return '-';
+    }).join('');
+    lines.push(timeAxis);
+
+    return lines.join('\n');
+  }
+
+  /**
+   * Detect hidden divergence (for more complete divergence analysis).
+   * Hidden bullish: price higher low, RSI lower low (trend continuation)
+   * Hidden bearish: price lower high, RSI higher high (trend continuation)
+   */
+  detectHiddenDivergence(prices, rsiValues, lookback = 20) {
+    if (prices.length < lookback || rsiValues.length < lookback) {
+      return { hiddenBullish: false, hiddenBearish: false };
+    }
+
+    const recentPrices = prices.slice(-lookback);
+    const recentRSI = rsiValues.slice(-lookback);
+    const half = Math.floor(lookback / 2);
+
+    const priceMin1 = Math.min(...recentPrices.slice(0, half));
+    const priceMin2 = Math.min(...recentPrices.slice(half));
+    const rsiMin1 = Math.min(...recentRSI.slice(0, half));
+    const rsiMin2 = Math.min(...recentRSI.slice(half));
+
+    const priceMax1 = Math.max(...recentPrices.slice(0, half));
+    const priceMax2 = Math.max(...recentPrices.slice(half));
+    const rsiMax1 = Math.max(...recentRSI.slice(0, half));
+    const rsiMax2 = Math.max(...recentRSI.slice(half));
+
+    // Hidden bullish: price higher low, RSI lower low
+    const hiddenBullish = priceMin2 > priceMin1 && rsiMin2 < rsiMin1;
+    // Hidden bearish: price lower high, RSI higher high
+    const hiddenBearish = priceMax2 < priceMax1 && rsiMax2 > rsiMax1;
+
+    return { hiddenBullish, hiddenBearish };
+  }
 }
 
 module.exports = new IndicatorService();
