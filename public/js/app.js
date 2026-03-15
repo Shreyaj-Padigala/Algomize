@@ -491,6 +491,11 @@ async function checkSessionStatus() {
         localStorage.setItem('selectedStrategyId', status.activeStrategyId);
         renderStrategies();
       }
+      // Replay workflow history from server
+      if (status.workflowHistory && status.workflowHistory.length > 0) {
+        clearWorkflow();
+        status.workflowHistory.forEach(entry => addWorkflowEntry(entry));
+      }
     }
     if (status.consecutiveLosses !== undefined) updateLossDots(status.consecutiveLosses);
     if (status.hasPendingSignal && status.pendingSignal) {

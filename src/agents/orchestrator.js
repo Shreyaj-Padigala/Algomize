@@ -33,7 +33,7 @@ class Orchestrator {
     this.pendingSignal = null;
     this.currentTrade = null;
     this.tradeLog = [];
-  }
+    this.workflowHistory = []; // Buffer for workflow events
 
   async startSession(strategyId) {
     if (this.running) {
@@ -48,6 +48,7 @@ class Orchestrator {
     this.pendingSignal = null;
     this.currentTrade = null;
     this.tradeLog = [];
+    this.workflowHistory = [];
 
     const agentResult = await pool.query(
       'SELECT * FROM strategy_agents WHERE strategy_id = $1',
@@ -434,13 +435,23 @@ class Orchestrator {
         side: this.pendingSignal.side,
         confidence: this.pendingSignal.confidence,
         entryPrice: this.pendingSignal.entryPrice,
+        agentScores: this.pendingSignal.agentResults,
+        avgLongScore: this.pendingSignal.avgLongScore,
+        avgShortScore: this.pendingSignal.avgShortScore,
       } : null,
       hasPendingSignal: !!this.pendingSignal,
+      workflowHistory: this.workflowHistory,
     };
   }
 
   _emitWorkflow(type, title, detail) {
-    this._emit('workflow:update', { type, title, detail, timestamp: Date.now() });
+    const entry = { type, title, detail, timestamp: Date.now() };
+    this.workflowHistory.push(entry);
+    // Keep last 200 entries to avoid memory bloat
+    if (this.workflowHistory.length > 200) {
+      this.workflowHistory = this.workflowHistory.slice(-200);
+    }
+    this._emit('workflow:update', entry);
   }
 
   _emit(event, data) {
