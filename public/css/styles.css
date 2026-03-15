@@ -116,6 +116,28 @@ header h1 {
   color: var(--text-secondary);
 }
 
+/* Nav Links */
+.nav-link {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  font-family: var(--mono);
+}
+
+.nav-link:hover {
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+.nav-link.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
 /* Main Layout */
 main {
   height: calc(100vh - 42px);
@@ -483,17 +505,11 @@ main {
 }
 
 .chart-container {
-  height: 280px;
+  height: 420px;
   display: flex;
   flex-direction: column;
 }
 
-.rsi-container {
-  height: 120px;
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border);
-}
 
 .chart-header {
   display: flex;
@@ -520,10 +536,6 @@ main {
   background: var(--bg-primary);
 }
 
-.rsi-canvas {
-  flex: 1;
-  background: var(--bg-primary);
-}
 
 /* Signal Scores */
 .signal-scores {
@@ -651,12 +663,23 @@ main {
   word-break: break-word;
 }
 
-/* Signal Prompt */
-.signal-prompt {
-  margin: 0 16px;
+/* Signal Overlay */
+.signal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.signal-modal {
+  width: 460px;
+  max-width: 90vw;
   border: 2px solid var(--warning);
-  border-radius: 6px;
-  background: rgba(243, 156, 18, 0.08);
+  border-radius: 8px;
+  background: var(--bg-secondary);
   overflow: hidden;
   animation: signalPulse 2s infinite;
 }
@@ -818,6 +841,23 @@ main {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--border-light);
+}
+
+/* Trades Page */
+.trades-page {
+  height: calc(100vh - 42px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.trades-page-header {
+  flex-shrink: 0;
+}
+
+.trades-page-scroll {
+  flex: 1;
+  overflow-y: auto;
 }
 
 /* Responsive */

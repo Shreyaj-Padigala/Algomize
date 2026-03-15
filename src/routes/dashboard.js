@@ -12,7 +12,7 @@ function createDashboardRoutes(orchestrator) {
   router.get('/summary', async (req, res) => {
     try {
       const strategies = await pool.query('SELECT * FROM strategies ORDER BY created_at DESC');
-      const totalPnl = strategies.rows.reduce((sum, s) => sum + parseFloat(s.pnl_total || 0), 0);
+      const totalPnl = strategies.rows.reduce((sum, s) => sum + parseFloat(s.pnl_total || 0), 0); // cumulative PnL %
 
       const openTrades = await pool.query("SELECT COUNT(*) FROM trades WHERE result = 'open'");
       const completedTrades = await pool.query("SELECT COUNT(*) FROM trades WHERE result != 'open'");

@@ -18,12 +18,12 @@ class ICTAgent {
     const currentPrice = candles15m[candles15m.length - 1].close;
 
     const aiContext = await groqService.analyze(
-      `Interpret ICT concepts for BTC/USDT:
-       FVGs (15m): ${fvgs15m.length} found, recent: ${JSON.stringify(fvgs15m.slice(-3))}
-       Liquidity sweeps: ${JSON.stringify(sweeps)}
-       Order blocks: ${JSON.stringify(orderBlocks.slice(-3))}
-       Zone: ${premiumDiscount.zone}
-       Do NOT calculate anything.`
+      `BTC/USDT is at $${currentPrice} RIGHT NOW. Evaluate ICT conditions for entering at this exact price:
+       Current zone: ${premiumDiscount.zone} (${premiumDiscount.zone === 'discount' ? 'favorable for longs' : premiumDiscount.zone === 'premium' ? 'favorable for shorts' : 'neutral'})
+       Recent liquidity sweeps: ${JSON.stringify(sweeps)}
+       Nearby order blocks: ${JSON.stringify(orderBlocks.slice(-3))}
+       Unfilled FVGs: ${fvgs15m.length}
+       Is NOW a good ICT entry at $${currentPrice}? Answer as JSON: { "entryNow": "yes or no", "bias": "bullish or bearish or neutral", "reasoning": "brief" }`
     );
 
     // Score /10

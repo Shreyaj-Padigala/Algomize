@@ -26,24 +26,25 @@ class MicroTrendAgent {
     const asciiChart = indicatorService.generateAsciiChart(candles15m, 48, 18);
 
     const aiContext = await groqService.analyze(
-      `You are reading a 15-minute BTC/USDT candlestick chart (ASCII representation).
+      `You are reading a 15-minute BTC/USDT candlestick chart. The CURRENT price is $${currentPrice} (rightmost candle).
 '+' = bullish candle, '#' = bearish candle, '|' = wick.
 
 CHART:
 ${asciiChart}
 
-Additional data:
-- Market structure trend: ${structure.trend}
-- Recent structures: ${JSON.stringify(structure.structures.slice(-4))}
+Context:
+- Structure trend: ${structure.trend}
 - BOS: ${JSON.stringify(structure.bos)}
 - EMA20 vs EMA50: ${emaTrend}
 - Price vs EMA20: ${currentEma20 ? (currentPrice > currentEma20 ? 'above' : 'below') : 'n/a'}
 
-Based on the visual chart pattern and data, provide your analysis as JSON:
+IMPORTANT: Evaluate whether entering a trade RIGHT NOW at $${currentPrice} is favorable based on the most recent price action. Do NOT suggest waiting for price to reach other levels. Only assess the current moment.
+
+Respond as JSON:
 {
-  "pattern": "what chart pattern you see (e.g. ascending triangle, head and shoulders, channel, etc.)",
+  "pattern": "chart pattern at current price area",
   "bias": "bullish or bearish or neutral",
-  "reasoning": "brief explanation"
+  "reasoning": "why entering NOW is or is not favorable"
 }`
     );
 

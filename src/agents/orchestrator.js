@@ -33,7 +33,7 @@ class Orchestrator {
     this.pendingSignal = null;
     this.currentTrade = null;
     this.tradeLog = [];
-  }
+    this.workflowHistory = []; // Buffer for workflow events
 
   async startSession(strategyId) {
     if (this.running) {
@@ -48,6 +48,7 @@ class Orchestrator {
     this.pendingSignal = null;
     this.currentTrade = null;
     this.tradeLog = [];
+    this.workflowHistory = [];
 
     const agentResult = await pool.query(
       'SELECT * FROM strategy_agents WHERE strategy_id = $1',
@@ -133,75 +134,25 @@ class Orchestrator {
         candles1h: candles1h.slice(-48),    // 2 days of 1h candles
       });
 
-      const results = {};
-      const agentTasks = [];
-
-      if (this.enabledAgents.has('rsi')) {
-        agentTasks.push(
-          this.agents.rsi.analyze(candles15m).then(r => {
-            results.rsi = r;
-            this._emitWorkflow('agent', 'RSI',
-              `RSI: ${r.currentRSI}, ${r.divLabel} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-            this._emit('agent:update', { agent: 'rsi', data: this._summarizeAgent('rsi', r) });
-            // Send RSI data for chart
-            this._emit('rsi:data', { values: r.rsiHistory, current: r.currentRSI });
-          })
-        );
-      }
-
-      if (this.enabledAgents.has('microTrend')) {
-        agentTasks.push(
-          this.agents.microTrend.analyze(candles15m).then(r => {
-            results.microTrend = r;
-            this._emitWorkflow('agent', 'Micro Trend (15m)',
-              `${r.pattern || r.trend} | EMA: ${r.emaTrend} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-            this._emit('agent:update', { agent: 'microTrend', data: this._summarizeAgent('microTrend', r) });
-          })
-        );
-      }
-
-      if (this.enabledAgents.has('macroTrend')) {
-        agentTasks.push(
-          this.agents.macroTrend.analyze(candles1h).then(r => {
-            results.macroTrend = r;
-            this._emitWorkflow('agent', 'Macro Trend (1h)',
-              `${r.pattern || r.macroTrend} | Bias: ${r.directionalBias} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-            this._emit('agent:update', { agent: 'macroTrend', data: this._summarizeAgent('macroTrend', r) });
-          })
-        );
-      }
-
-      if (this.enabledAgents.has('confluence')) {
-        agentTasks.push(
-          this.agents.confluence.analyze(candles15m, candles1h).then(r => {
-            results.confluence = r;
-            this._emitWorkflow('agent', 'Confluence',
-              `${r.proximitySignal === 'near_key_level' ? `Near key level (${r.nearbyLevels.length})` : 'Open space'} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-            this._emit('agent:update', { agent: 'confluence', data: this._summarizeAgent('confluence', r) });
-          })
-        );
-      }
-
-      if (this.enabledAgents.has('ict')) {
-        agentTasks.push(
-          this.agents.ict.analyze(candles15m, candles1h).then(r => {
-            results.ict = r;
-            this._emitWorkflow('agent', 'ICT',
-              `Zone: ${r.premiumDiscount?.zone || 'n/a'} | Sweeps: ${r.liquiditySweeps?.length || 0} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-            this._emit('agent:update', { agent: 'ict', data: this._summarizeAgent('ict', r) });
-          })
-        );
-      }
-
-      await Promise.all(agentTasks);
-
-      // Check for open trades - Exit Agent
+      // Check for open trades first to determine workflow mode
       const openTrades = await pool.query(
         "SELECT * FROM trades WHERE strategy_id = $1 AND result = 'open'",
         [this.activeStrategy.id]
       );
 
-      if (openTrades.rows.length > 0 && this.enabledAgents.has('exit')) {
+      const hasOpenTrade = openTrades.rows.length > 0;
+      const results = {};
+
+      // If we have an open trade, only run exit analysis — skip entry agents
+      if (hasOpenTrade && this.enabledAgents.has('exit')) {
+        // Still need RSI for exit agent divergence checks
+        if (this.enabledAgents.has('rsi')) {
+          results.rsi = await this.agents.rsi.analyze(candles15m);
+          this._emitWorkflow('agent', 'RSI',
+            `RSI: ${results.rsi.currentRSI}, ${results.rsi.divLabel}`);
+          this._emit('agent:update', { agent: 'rsi', data: this._summarizeAgent('rsi', results.rsi) });
+        }
+
         const openTrade = openTrades.rows[0];
         results.exit = await this.agents.exit.analyze({
           openTrade,
@@ -212,17 +163,82 @@ class Orchestrator {
 
         if (results.exit.shouldClose) {
           this._emitWorkflow('exit', 'Exit signal triggered',
-            `Triggers: ${results.exit.triggers.join(', ')} | PnL: $${results.exit.unrealizedPnl.toFixed(2)}`);
+            `Triggers: ${results.exit.triggers.join(', ')} | PnL: ${results.exit.leveragedPnlPercent.toFixed(2)}%`);
           await this._closeTrade(openTrade, results.exit);
         } else {
-          const pnlPercent = ((currentPrice - parseFloat(openTrade.entry_price)) / parseFloat(openTrade.entry_price) * 100 * 100).toFixed(2);
+          const entryPrice = parseFloat(openTrade.entry_price);
+          const side = openTrade.side;
+          const priceDiff = side === 'buy' ? currentPrice - entryPrice : entryPrice - currentPrice;
+          const pnlPercent = (priceDiff / entryPrice * 100 * 100).toFixed(2);
           this._emitWorkflow('holding', 'Position open',
-            `${openTrade.side.toUpperCase()} from $${parseFloat(openTrade.entry_price).toLocaleString()} | Current: $${currentPrice.toLocaleString()} | PnL: ${pnlPercent}%`);
+            `${side.toUpperCase()} from $${entryPrice.toLocaleString()} | Current: $${currentPrice.toLocaleString()} | PnL: ${pnlPercent}%`);
         }
       }
 
+      // Only run entry agents when NOT in a trade and no pending signal
+      if (!hasOpenTrade && !this.pendingSignal) {
+        const agentTasks = [];
+
+        if (this.enabledAgents.has('rsi')) {
+          agentTasks.push(
+            this.agents.rsi.analyze(candles15m).then(r => {
+              results.rsi = r;
+              this._emitWorkflow('agent', 'RSI',
+                `RSI: ${r.currentRSI}, ${r.divLabel} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+              this._emit('agent:update', { agent: 'rsi', data: this._summarizeAgent('rsi', r) });
+            })
+          );
+        }
+
+        if (this.enabledAgents.has('microTrend')) {
+          agentTasks.push(
+            this.agents.microTrend.analyze(candles15m).then(r => {
+              results.microTrend = r;
+              this._emitWorkflow('agent', 'Micro Trend (15m)',
+                `${r.pattern || r.trend} | EMA: ${r.emaTrend} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+              this._emit('agent:update', { agent: 'microTrend', data: this._summarizeAgent('microTrend', r) });
+            })
+          );
+        }
+
+        if (this.enabledAgents.has('macroTrend')) {
+          agentTasks.push(
+            this.agents.macroTrend.analyze(candles1h).then(r => {
+              results.macroTrend = r;
+              this._emitWorkflow('agent', 'Macro Trend (1h)',
+                `${r.pattern || r.macroTrend} | Bias: ${r.directionalBias} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+              this._emit('agent:update', { agent: 'macroTrend', data: this._summarizeAgent('macroTrend', r) });
+            })
+          );
+        }
+
+        if (this.enabledAgents.has('confluence')) {
+          agentTasks.push(
+            this.agents.confluence.analyze(candles15m, candles1h).then(r => {
+              results.confluence = r;
+              this._emitWorkflow('agent', 'Confluence',
+                `${r.proximitySignal === 'near_key_level' ? `Near key level (${r.nearbyLevels.length})` : 'Open space'} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+              this._emit('agent:update', { agent: 'confluence', data: this._summarizeAgent('confluence', r) });
+            })
+          );
+        }
+
+        if (this.enabledAgents.has('ict')) {
+          agentTasks.push(
+            this.agents.ict.analyze(candles15m, candles1h).then(r => {
+              results.ict = r;
+              this._emitWorkflow('agent', 'ICT',
+                `Zone: ${r.premiumDiscount?.zone || 'n/a'} | Sweeps: ${r.liquiditySweeps?.length || 0} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
+              this._emit('agent:update', { agent: 'ict', data: this._summarizeAgent('ict', r) });
+            })
+          );
+        }
+
+        await Promise.all(agentTasks);
+      }
+
       // Final Decision Agent (only if no open trade and no pending signal)
-      if (openTrades.rows.length === 0 && !this.pendingSignal && this.enabledAgents.has('finalDecision')) {
+      if (!hasOpenTrade && !this.pendingSignal && this.enabledAgents.has('finalDecision')) {
         results.finalDecision = await this.agents.finalDecision.analyze({
           confluence: results.confluence,
           microTrend: results.microTrend,
@@ -294,19 +310,19 @@ class Orchestrator {
   async _closeTrade(openTrade, exitResult) {
     try {
       const currentPrice = exitResult.currentPrice;
-      const pnl = exitResult.unrealizedPnl;
-      const result = pnl >= 0 ? 'win' : 'loss';
+      const pnlPercent = exitResult.leveragedPnlPercent;
+      const result = pnlPercent >= 0 ? 'win' : 'loss';
 
       const updatedTrade = await this.agents.data.updateTrade(openTrade.id, {
         exit_price: currentPrice,
         exit_time: new Date(),
-        pnl,
+        pnl: pnlPercent,
         result,
       });
 
       await pool.query(
         'UPDATE strategies SET pnl_total = pnl_total + $1 WHERE id = $2',
-        [pnl, this.activeStrategy.id]
+        [pnlPercent, this.activeStrategy.id]
       );
 
       const csvService = require('../services/csvService');
@@ -316,12 +332,12 @@ class Orchestrator {
       });
 
       this.currentTrade = null;
-      this.tradeLog.push({ result, pnl, triggers: exitResult.triggers });
+      this.tradeLog.push({ result, pnlPercent, triggers: exitResult.triggers });
 
       if (result === 'loss') {
         this.consecutiveLosses++;
         this._emitWorkflow('trade', 'Trade closed - LOSS',
-          `PnL: $${pnl.toFixed(2)} | Consecutive losses: ${this.consecutiveLosses}/${this.maxConsecutiveLosses}`);
+          `PnL: ${pnlPercent.toFixed(2)}% | Consecutive losses: ${this.consecutiveLosses}/${this.maxConsecutiveLosses}`);
         this._emit('session:update', { status: 'loss_update', consecutiveLosses: this.consecutiveLosses });
 
         if (this.consecutiveLosses >= this.maxConsecutiveLosses) {
@@ -333,7 +349,7 @@ class Orchestrator {
       } else {
         this.consecutiveLosses = 0;
         this._emitWorkflow('trade', 'Trade closed - WIN',
-          `PnL: +$${pnl.toFixed(2)} | Loss streak reset`);
+          `PnL: +${pnlPercent.toFixed(2)}% | Loss streak reset`);
         this._emit('session:update', { status: 'loss_update', consecutiveLosses: 0 });
       }
 
@@ -412,19 +428,30 @@ class Orchestrator {
     return {
       running: this.running,
       activeStrategy: this.activeStrategy,
+      activeStrategyId: this.activeStrategy?.id || null,
       enabledAgents: [...this.enabledAgents],
       consecutiveLosses: this.consecutiveLosses,
       pendingSignal: this.pendingSignal ? {
         side: this.pendingSignal.side,
         confidence: this.pendingSignal.confidence,
         entryPrice: this.pendingSignal.entryPrice,
+        agentScores: this.pendingSignal.agentResults,
+        avgLongScore: this.pendingSignal.avgLongScore,
+        avgShortScore: this.pendingSignal.avgShortScore,
       } : null,
       hasPendingSignal: !!this.pendingSignal,
+      workflowHistory: this.workflowHistory,
     };
   }
 
   _emitWorkflow(type, title, detail) {
-    this._emit('workflow:update', { type, title, detail, timestamp: Date.now() });
+    const entry = { type, title, detail, timestamp: Date.now() };
+    this.workflowHistory.push(entry);
+    // Keep last 200 entries to avoid memory bloat
+    if (this.workflowHistory.length > 200) {
+      this.workflowHistory = this.workflowHistory.slice(-200);
+    }
+    this._emit('workflow:update', entry);
   }
 
   _emit(event, data) {

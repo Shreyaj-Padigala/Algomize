@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Algomize — Trade Log</title>
+  <link rel="stylesheet" href="/css/styles.css">
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <div class="header-left">
+        <span class="logo">&gt;_</span>
+        <h1>Algomize</h1>
+      </div>
+      <div class="header-center">
+        <span class="price-tag">BTC/USDT</span>
+        <span class="price-value" id="currentPrice">--</span>
+        <span class="price-source">via BloFin</span>
+      </div>
+      <div class="header-right">
+        <a href="/" class="nav-link">Dashboard</a>
+        <a href="/trades.html" class="nav-link active">Trade Log</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <div class="trades-page">
+      <!-- PNL % Chart -->
+      <div class="chart-container" style="height: 280px;">
+        <div class="chart-header">
+          <span class="chart-title">Cumulative PnL %</span>
+          <span class="chart-badge" id="pnlSummary">--</span>
+        </div>
+        <div id="pnlChart" class="chart-canvas"></div>
+      </div>
+
+      <!-- Trade Log Table -->
+      <div class="trades-page-header">
+        <div class="panel-header">
+          <span class="panel-title"># Trade Log</span>
+          <span class="panel-badge" id="tradeCountBadge">0 trades</span>
+        </div>
+      </div>
+      <div class="trades-page-scroll">
+        <table class="trades-table">
+          <thead>
+            <tr>
+              <th>ID</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL %</th><th>Result</th><th>Time</th>
+            </tr>
+          </thead>
+          <tbody id="tradesBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const API_BASE = '';
+    const socket = io();
+    let pnlChart = null;
+    let pnlSeries = null;
+
+    const els = {
+      currentPrice: document.getElementById('currentPrice'),
+      tradesBody: document.getElementById('tradesBody'),
+      tradeCountBadge: document.getElementById('tradeCountBadge'),
+      pnlSummary: document.getElementById('pnlSummary'),
+    };
+
+    async function api(path) {
+      const res = await fetch(`${API_BASE}${path}`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      return res.json();
+    }
+
+    socket.on('market:update', (data) => {
+      els.currentPrice.textContent = `$${parseFloat(data.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    });
+
+    socket.on('connect', () => {
+      socket.emit('market:subscribe');
+    });
+
+    socket.on('trade:update', () => loadTrades());
+
+    function initPnlChart() {
+      const container = document.getElementById('pnlChart');
+      pnlChart = LightweightCharts.createChart(container, {
+        width: container.clientWidth,
+        height: container.clientHeight,
+        layout: {
+          background: { type: 'solid', color: '#1a1a2e' },
+          textColor: '#7f8c8d',
+          fontSize: 10,
+        },
+        grid: {
+          vertLines: { color: 'rgba(35, 53, 84, 0.3)' },
+          horzLines: { color: 'rgba(35, 53, 84, 0.3)' },
+        },
+        crosshair: { mode: 0 },
+        rightPriceScale: {
+          borderColor: '#233554',
+        },
+        timeScale: {
+          borderColor: '#233554',
+          timeVisible: true,
+          secondsVisible: false,
+        },
+      });
+
+      pnlSeries = pnlChart.addLineSeries({
+        color: '#00d2ff',
+        lineWidth: 2,
+        priceFormat: {
+          type: 'custom',
+          formatter: v => v.toFixed(2) + '%',
+        },
+      });
+
+      // Add zero baseline
+      pnlSeries.createPriceLine({
+        price: 0,
+        color: 'rgba(127, 140, 141, 0.4)',
+        lineWidth: 1,
+        lineStyle: 2,
+      });
+
+      const resizeObserver = new ResizeObserver(() => {
+        pnlChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+      });
+      resizeObserver.observe(container);
+    }
+
+    function updatePnlChart(trades) {
+      if (!pnlSeries || trades.length === 0) return;
+
+      // Sort trades by exit time ascending
+      const sorted = trades
+        .filter(t => t.exit_time && t.pnl !== null)
+        .sort((a, b) => new Date(a.exit_time) - new Date(b.exit_time));
+
+      if (sorted.length === 0) return;
+
+      let cumulative = 0;
+      const data = sorted.map(t => {
+        cumulative += parseFloat(t.pnl || 0);
+        return {
+          time: Math.floor(new Date(t.exit_time).getTime() / 1000),
+          value: Math.round(cumulative * 100) / 100,
+        };
+      });
+
+      // Update line color based on final PnL
+      const finalPnl = data[data.length - 1].value;
+      pnlSeries.applyOptions({
+        color: finalPnl >= 0 ? '#00d2ff' : '#e94560',
+      });
+
+      pnlSeries.setData(data);
+      els.pnlSummary.textContent = `Total: ${finalPnl >= 0 ? '+' : ''}${finalPnl.toFixed(2)}%`;
+      els.pnlSummary.style.color = finalPnl >= 0 ? '#00d2ff' : '#e94560';
+    }
+
+    async function loadTrades() {
+      try {
+        const trades = await api('/api/dashboard/trades');
+        els.tradeCountBadge.textContent = `${trades.length} trades`;
+        els.tradesBody.innerHTML = trades.map((t) => `
+          <tr>
+            <td>${t.id}</td>
+            <td class="trade-${t.side}">${t.side.toUpperCase()}</td>
+            <td>$${parseFloat(t.entry_price || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}</td>
+            <td>${t.exit_price ? '$' + parseFloat(t.exit_price).toLocaleString('en-US', { minimumFractionDigits: 2 }) : '--'}</td>
+            <td class="${parseFloat(t.pnl || 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}">
+              ${t.pnl !== null ? parseFloat(t.pnl).toFixed(2) + '%' : '--'}
+            </td>
+            <td class="${t.result === 'win' ? 'trade-win' : t.result === 'loss' ? 'trade-loss' : 'trade-open'}">
+              ${t.result || 'open'}
+            </td>
+            <td>${t.entry_time ? new Date(t.entry_time).toLocaleString() : '--'}</td>
+          </tr>
+        `).join('');
+
+        updatePnlChart(trades);
+      } catch (e) {}
+    }
+
+    initPnlChart();
+    loadTrades();
+    setInterval(loadTrades, 15000);
+  </script>
+</body>
+</html>

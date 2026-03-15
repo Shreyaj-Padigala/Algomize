@@ -19,21 +19,20 @@ class ConfluenceAgent {
 
     const reactions = this._findPriorReactions(candles15m, allLevels);
 
+    const nearSupports = nearbyLevels.filter(l => l.type === 'support');
+    const nearResistances = nearbyLevels.filter(l => l.type === 'resistance');
+
     const aiContext = await groqService.analyze(
-      `Interpret these support/resistance levels for BTC/USDT trading context.
-       Current price: ${currentPrice}
-       Support levels: ${JSON.stringify(levels15m.filter(l => l.type === 'support').slice(0, 3))}
-       Resistance levels: ${JSON.stringify(levels15m.filter(l => l.type === 'resistance').slice(0, 3))}
-       Nearby levels count: ${nearbyLevels.length}
-       Do NOT calculate anything. Just interpret the significance.`
+      `BTC/USDT is currently at $${currentPrice}. Should a trader enter a position RIGHT NOW at this exact price?
+       Nearby support levels (within 0.5%): ${JSON.stringify(nearSupports.map(l => l.price))}
+       Nearby resistance levels (within 0.5%): ${JSON.stringify(nearResistances.map(l => l.price))}
+       Is the current price sitting at a key level that makes it a good entry NOW? Not in the future, but RIGHT NOW.
+       Answer as JSON: { "entryNow": "yes or no", "reasoning": "brief explanation" }`
     );
 
     // Score /10
     let longScore = 5;
     let shortScore = 5;
-
-    const nearSupports = nearbyLevels.filter(l => l.type === 'support');
-    const nearResistances = nearbyLevels.filter(l => l.type === 'resistance');
 
     // Near strong support = bullish bounce potential
     if (nearSupports.length > 0) {
