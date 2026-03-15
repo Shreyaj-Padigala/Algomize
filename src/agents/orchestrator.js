@@ -162,7 +162,7 @@ class Orchestrator {
 
         if (results.exit.shouldClose) {
           this._emitWorkflow('exit', 'Exit signal triggered',
-            `Triggers: ${results.exit.triggers.join(', ')} | PnL: $${results.exit.unrealizedPnl.toFixed(2)}`);
+            `Triggers: ${results.exit.triggers.join(', ')} | PnL: ${results.exit.leveragedPnlPercent.toFixed(2)}%`);
           await this._closeTrade(openTrade, results.exit);
         } else {
           const entryPrice = parseFloat(openTrade.entry_price);
@@ -309,19 +309,19 @@ class Orchestrator {
   async _closeTrade(openTrade, exitResult) {
     try {
       const currentPrice = exitResult.currentPrice;
-      const pnl = exitResult.unrealizedPnl;
-      const result = pnl >= 0 ? 'win' : 'loss';
+      const pnlPercent = exitResult.leveragedPnlPercent;
+      const result = pnlPercent >= 0 ? 'win' : 'loss';
 
       const updatedTrade = await this.agents.data.updateTrade(openTrade.id, {
         exit_price: currentPrice,
         exit_time: new Date(),
-        pnl,
+        pnl: pnlPercent,
         result,
       });
 
       await pool.query(
         'UPDATE strategies SET pnl_total = pnl_total + $1 WHERE id = $2',
-        [pnl, this.activeStrategy.id]
+        [pnlPercent, this.activeStrategy.id]
       );
 
       const csvService = require('../services/csvService');
@@ -331,12 +331,12 @@ class Orchestrator {
       });
 
       this.currentTrade = null;
-      this.tradeLog.push({ result, pnl, triggers: exitResult.triggers });
+      this.tradeLog.push({ result, pnlPercent, triggers: exitResult.triggers });
 
       if (result === 'loss') {
         this.consecutiveLosses++;
         this._emitWorkflow('trade', 'Trade closed - LOSS',
-          `PnL: $${pnl.toFixed(2)} | Consecutive losses: ${this.consecutiveLosses}/${this.maxConsecutiveLosses}`);
+          `PnL: ${pnlPercent.toFixed(2)}% | Consecutive losses: ${this.consecutiveLosses}/${this.maxConsecutiveLosses}`);
         this._emit('session:update', { status: 'loss_update', consecutiveLosses: this.consecutiveLosses });
 
         if (this.consecutiveLosses >= this.maxConsecutiveLosses) {
@@ -348,7 +348,7 @@ class Orchestrator {
       } else {
         this.consecutiveLosses = 0;
         this._emitWorkflow('trade', 'Trade closed - WIN',
-          `PnL: +$${pnl.toFixed(2)} | Loss streak reset`);
+          `PnL: +${pnlPercent.toFixed(2)}% | Loss streak reset`);
         this._emit('session:update', { status: 'loss_update', consecutiveLosses: 0 });
       }
 
@@ -427,6 +427,7 @@ class Orchestrator {
     return {
       running: this.running,
       activeStrategy: this.activeStrategy,
+      activeStrategyId: this.activeStrategy?.id || null,
       enabledAgents: [...this.enabledAgents],
       consecutiveLosses: this.consecutiveLosses,
       pendingSignal: this.pendingSignal ? {

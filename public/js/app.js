@@ -3,7 +3,7 @@ const socket = io();
 
 // State
 let strategies = [];
-let selectedStrategyId = null;
+let selectedStrategyId = parseInt(localStorage.getItem('selectedStrategyId')) || null;
 let sessionRunning = false;
 let workflowCount = 0;
 let priceChart = null;
@@ -360,7 +360,7 @@ function renderStrategies() {
     <div class="strategy-item ${selectedStrategyId === s.id ? 'selected' : ''}" onclick="selectStrategy(${s.id})">
       <div>
         <span class="name">${s.name}</span>
-        <div class="meta">PnL: $${parseFloat(s.pnl_total || 0).toFixed(2)}</div>
+        <div class="meta">PnL: ${parseFloat(s.pnl_total || 0).toFixed(2)}%</div>
       </div>
       <div class="actions">
         <button class="btn-sm" onclick="event.stopPropagation(); deleteStrategy(${s.id})">del</button>
@@ -371,6 +371,7 @@ function renderStrategies() {
 
 function selectStrategy(id) {
   selectedStrategyId = id;
+  localStorage.setItem('selectedStrategyId', id);
   renderStrategies();
   updateSessionButtons();
   loadPerformance();
@@ -451,7 +452,7 @@ async function loadPerformance() {
   try {
     const params = selectedStrategyId ? `?strategyId=${selectedStrategyId}` : '';
     const perf = await api(`/api/history/performance${params}`);
-    els.lifetimePnl.textContent = `$${(perf.totalPnl || 0).toFixed(2)}`;
+    els.lifetimePnl.textContent = `${(perf.totalPnl || 0).toFixed(2)}%`;
     els.lifetimePnl.className = `perf-value ${perf.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
     els.winRate.textContent = `${perf.winRate || 0}%`;
     els.tradeCount.textContent = perf.totalTrades || 0;
@@ -461,7 +462,7 @@ async function loadPerformance() {
 async function loadDashboardSummary() {
   try {
     const summary = await api('/api/dashboard/summary');
-    els.sessionPnl.textContent = `$${(summary.totalPnl || 0).toFixed(2)}`;
+    els.sessionPnl.textContent = `${(summary.totalPnl || 0).toFixed(2)}%`;
     els.sessionPnl.className = `perf-value ${summary.totalPnl >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
   } catch (e) {}
 }
@@ -484,8 +485,17 @@ async function checkSessionStatus() {
       els.sessionStatus.textContent = 'Running';
       els.sessionStatus.style.color = 'var(--success)';
       setBotIndicator(true);
+      // Auto-select the active strategy so controls work after navigation
+      if (status.activeStrategyId) {
+        selectedStrategyId = status.activeStrategyId;
+        localStorage.setItem('selectedStrategyId', status.activeStrategyId);
+        renderStrategies();
+      }
     }
     if (status.consecutiveLosses !== undefined) updateLossDots(status.consecutiveLosses);
+    if (status.hasPendingSignal && status.pendingSignal) {
+      showSignalPrompt(status.pendingSignal);
+    }
     updateSessionButtons();
   } catch (e) {}
 }
