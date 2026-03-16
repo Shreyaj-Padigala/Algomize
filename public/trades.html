@@ -22,16 +22,17 @@
       <div class="header-right">
         <a href="/" class="nav-link">Dashboard</a>
         <a href="/trades.html" class="nav-link active">Trade Log</a>
+        <button class="btn-logout" id="btnLogout" title="Logout">&#x2715;</button>
       </div>
     </div>
   </header>
 
   <main>
     <div class="trades-page">
-      <!-- PNL % Chart -->
+      <!-- PNL % vs Trades Chart -->
       <div class="chart-container" style="height: 280px;">
         <div class="chart-header">
-          <span class="chart-title">Cumulative PnL %</span>
+          <span class="chart-title">PnL (%) vs. Trades</span>
           <span class="chart-badge" id="pnlSummary">--</span>
         </div>
         <div id="pnlChart" class="chart-canvas"></div>
@@ -59,6 +60,20 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script>
+    // Auth check
+    const token = localStorage.getItem('token');
+    if (!token) {
+      window.location.href = '/login.html';
+    }
+
+    // Logout
+    document.getElementById('btnLogout').addEventListener('click', () => {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userEmail');
+      localStorage.removeItem('userId');
+      window.location.href = '/login.html';
+    });
+
     const API_BASE = '';
     const socket = io();
     let pnlChart = null;
@@ -73,8 +88,16 @@
 
     async function api(path) {
       const res = await fetch(`${API_BASE}${path}`, {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
       });
+      if (res.status === 401 || res.status === 403) {
+        localStorage.removeItem('token');
+        window.location.href = '/login.html';
+        return [];
+      }
       return res.json();
     }
 
@@ -108,8 +131,7 @@
         },
         timeScale: {
           borderColor: '#233554',
-          timeVisible: true,
-          secondsVisible: false,
+          timeVisible: false,
         },
       });
 
@@ -139,18 +161,20 @@
     function updatePnlChart(trades) {
       if (!pnlSeries || trades.length === 0) return;
 
-      // Sort trades by exit time ascending
+      // Filter to closed trades only and sort by exit time
       const sorted = trades
         .filter(t => t.exit_time && t.pnl !== null)
         .sort((a, b) => new Date(a.exit_time) - new Date(b.exit_time));
 
       if (sorted.length === 0) return;
 
+      // PNL (%) vs Trades — X axis is trade number, Y axis is cumulative PNL %
       let cumulative = 0;
-      const data = sorted.map(t => {
+      const data = sorted.map((t, index) => {
         cumulative += parseFloat(t.pnl || 0);
         return {
-          time: Math.floor(new Date(t.exit_time).getTime() / 1000),
+          // Use trade index as the "time" value for PNL vs Trades chart
+          time: index + 1,
           value: Math.round(cumulative * 100) / 100,
         };
       });
@@ -162,13 +186,14 @@
       });
 
       pnlSeries.setData(data);
-      els.pnlSummary.textContent = `Total: ${finalPnl >= 0 ? '+' : ''}${finalPnl.toFixed(2)}%`;
+      els.pnlSummary.textContent = `${sorted.length} trades | Total: ${finalPnl >= 0 ? '+' : ''}${finalPnl.toFixed(2)}%`;
       els.pnlSummary.style.color = finalPnl >= 0 ? '#00d2ff' : '#e94560';
     }
 
     async function loadTrades() {
       try {
         const trades = await api('/api/dashboard/trades');
+        if (!Array.isArray(trades)) return;
         els.tradeCountBadge.textContent = `${trades.length} trades`;
         els.tradesBody.innerHTML = trades.map((t) => `
           <tr>

@@ -1,5 +1,34 @@
+// Auth check — redirect to login if no token
+const token = localStorage.getItem('token');
+if (!token) {
+  window.location.href = '/login.html';
+}
+
 const API_BASE = '';
 const socket = io();
+
+// Authenticated fetch helper
+async function api(path, options = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+    ...(options.headers || {}),
+  };
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (res.status === 401 || res.status === 403) {
+    localStorage.removeItem('token');
+    localStorage.removeItem('userEmail');
+    localStorage.removeItem('userId');
+    window.location.href = '/login.html';
+    return {};
+  }
+  // Check if response is JSON
+  const contentType = res.headers.get('content-type');
+  if (contentType && contentType.includes('audio/mpeg')) {
+    return res;
+  }
+  return res.json();
+}
 
 // State
 let strategies = [];
@@ -8,6 +37,7 @@ let sessionRunning = false;
 let workflowCount = 0;
 let priceChart = null;
 let candleSeries = null;
+let currentConditions = [];
 
 // DOM
 const els = {
@@ -40,17 +70,32 @@ const els = {
   loss2: document.getElementById('loss2'),
   loss3: document.getElementById('loss3'),
   chartUpdateTime: document.getElementById('chartUpdateTime'),
+  conditionsSection: document.getElementById('conditionsSection'),
+  conditionsList: document.getElementById('conditionsList'),
+  btnAddCondition: document.getElementById('btnAddCondition'),
+  btnSaveConditions: document.getElementById('btnSaveConditions'),
+  btnVoiceAnalysis: document.getElementById('btnVoiceAnalysis'),
+  voiceOverlay: document.getElementById('voiceOverlay'),
+  voiceStatus: document.getElementById('voiceStatus'),
+  voiceText: document.getElementById('voiceText'),
+  btnCloseVoice: document.getElementById('btnCloseVoice'),
+  btnLogout: document.getElementById('btnLogout'),
 };
+
+// ---------- Logout ----------
+els.btnLogout.addEventListener('click', () => {
+  localStorage.removeItem('token');
+  localStorage.removeItem('userEmail');
+  localStorage.removeItem('userId');
+  window.location.href = '/login.html';
+});
 
 // ---------- Cash Register Sound ----------
 function playCashRegister() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-
-    // Ka-ching! sound: short metallic hit + bell ring
     const now = ctx.currentTime;
 
-    // Hit sound
     const hitOsc = ctx.createOscillator();
     const hitGain = ctx.createGain();
     hitOsc.type = 'square';
@@ -62,7 +107,6 @@ function playCashRegister() {
     hitOsc.start(now);
     hitOsc.stop(now + 0.1);
 
-    // Bell ring 1
     const bell1 = ctx.createOscillator();
     const bell1Gain = ctx.createGain();
     bell1.type = 'sine';
@@ -73,7 +117,6 @@ function playCashRegister() {
     bell1.start(now + 0.05);
     bell1.stop(now + 0.6);
 
-    // Bell ring 2 (higher)
     const bell2 = ctx.createOscillator();
     const bell2Gain = ctx.createGain();
     bell2.type = 'sine';
@@ -84,7 +127,6 @@ function playCashRegister() {
     bell2.start(now + 0.15);
     bell2.stop(now + 0.8);
 
-    // Bell ring 3 (highest - the ching!)
     const bell3 = ctx.createOscillator();
     const bell3Gain = ctx.createGain();
     bell3.type = 'sine';
@@ -96,9 +138,7 @@ function playCashRegister() {
     bell3.stop(now + 1.2);
 
     setTimeout(() => ctx.close(), 2000);
-  } catch (e) {
-    // AudioContext not available
-  }
+  } catch (e) {}
 }
 
 // ---------- Charts ----------
@@ -109,7 +149,6 @@ function initCharts() {
     gridColor: 'rgba(35, 53, 84, 0.3)',
   };
 
-  // Price chart
   const priceContainer = document.getElementById('priceChart');
   priceChart = LightweightCharts.createChart(priceContainer, {
     width: priceContainer.clientWidth,
@@ -141,7 +180,6 @@ function initCharts() {
     wickDownColor: '#e94560',
   });
 
-  // Resize handler
   const resizeObserver = new ResizeObserver(() => {
     priceChart.applyOptions({ width: priceContainer.clientWidth, height: priceContainer.clientHeight });
   });
@@ -163,15 +201,6 @@ function updateCharts(candles15m) {
   els.chartUpdateTime.textContent = new Date().toLocaleTimeString();
 }
 
-// ---------- API ----------
-async function api(path, options = {}) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  });
-  return res.json();
-}
-
 // ---------- Socket Events ----------
 socket.on('connect', () => {
   updateConnectionStatus(true);
@@ -185,12 +214,9 @@ socket.on('market:update', (data) => {
 });
 
 socket.on('chart:data', (data) => {
-  if (data.candles15m) {
-    updateCharts(data.candles15m);
-  }
+  if (data.candles15m) updateCharts(data.candles15m);
 });
 
-// Real-time candle updates from BloFin WebSocket
 socket.on('chart:update', (data) => {
   if (!candleSeries || !data.candle || data.timeframe !== '15m') return;
   const c = data.candle;
@@ -206,9 +232,7 @@ socket.on('chart:update', (data) => {
 
 socket.on('agent:update', () => loadAgentStatuses());
 
-socket.on('trade:update', () => {
-  loadPerformance();
-});
+socket.on('trade:update', () => loadPerformance());
 
 socket.on('session:update', (data) => {
   if (data.status === 'started') {
@@ -286,9 +310,9 @@ function addWorkflowEntry(data) {
 }
 
 // Signal prompt
-const AGENT_LABELS = {
-  confluence: 'Confluence', microTrend: 'Micro Trend', macroTrend: 'Macro Trend',
-  rsi: 'RSI', ict: 'ICT',
+const CONDITION_LABELS = {
+  condition_1: 'Agent 1', condition_2: 'Agent 2', condition_3: 'Agent 3',
+  condition_4: 'Agent 4', condition_5: 'Agent 5',
 };
 
 function showSignalPrompt(data) {
@@ -298,11 +322,10 @@ function showSignalPrompt(data) {
   els.signalPrice.textContent = `$${parseFloat(data.entryPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
   els.signalConfidence.textContent = `${(data.confidence * 100).toFixed(0)}%`;
 
-  // Show per-agent scores
   if (data.agentScores) {
     els.signalScores.innerHTML = Object.entries(data.agentScores).map(([name, s]) => `
       <div class="score-row">
-        <span class="score-agent">${AGENT_LABELS[name] || name}</span>
+        <span class="score-agent">${CONDITION_LABELS[name] || name}</span>
         <span class="score-values">
           <span class="score-long">${s.longScore}/10 Long</span>
           <span class="score-short">${s.shortScore}/10 Short</span>
@@ -318,8 +341,6 @@ function showSignalPrompt(data) {
       </div>
     `;
   }
-
-  // No need to scroll — overlay is fixed and centered
 }
 
 els.btnAcceptSignal.addEventListener('click', async () => {
@@ -345,22 +366,161 @@ function updateLossDots(count) {
   });
 }
 
-// Strategies
+// ---------- Conditions Editor ----------
+const CONDITION_TYPES = [
+  { value: 'rsi', label: 'RSI Threshold', hint: 'RSI over X → Short, RSI under Y → Long' },
+  { value: 'trend_up', label: 'Trending Up → Long', hint: 'If price is trending upwards then Long' },
+  { value: 'trend_down', label: 'Trending Down → Short', hint: 'If price is trending downwards then Short' },
+  { value: 'major_move_up', label: 'Major Move Up → Long', hint: 'Price made major upside moves at this price' },
+  { value: 'major_move_down', label: 'Major Move Down → Short', hint: 'Price made major downside moves at this price' },
+];
+
+function renderConditions() {
+  els.conditionsList.innerHTML = currentConditions.map((cond, i) => {
+    const typeOptions = CONDITION_TYPES.map(t =>
+      `<option value="${t.value}" ${cond.type === t.value ? 'selected' : ''}>${t.label}</option>`
+    ).join('');
+
+    let extraFields = '';
+    if (cond.type === 'rsi') {
+      extraFields = `
+        <div class="condition-extra">
+          <label>Short above: <input type="number" class="cond-input" value="${cond.shortAbove || 80}" onchange="updateCondField(${i}, 'shortAbove', this.value)"></label>
+          <label>Long below: <input type="number" class="cond-input" value="${cond.longBelow || 25}" onchange="updateCondField(${i}, 'longBelow', this.value)"></label>
+        </div>`;
+    }
+    if (cond.type === 'major_move_up' || cond.type === 'major_move_down') {
+      extraFields = `
+        <div class="condition-extra">
+          <label>Leverage: <input type="number" class="cond-input" value="${cond.leverage || ''}" placeholder="e.g. 50" onchange="updateCondField(${i}, 'leverage', this.value)"></label>
+          <label>Exit Strategy: <input type="text" class="cond-input wide" value="${cond.exitStrategy || ''}" placeholder="Default: -20% PNL exit" onchange="updateCondField(${i}, 'exitStrategy', this.value)"></label>
+        </div>
+        <div class="condition-warning">
+          *If no exit strategy provided, defaults to -20% PNL exit.
+        </div>`;
+    }
+
+    return `
+      <div class="condition-card">
+        <div class="condition-header">
+          <span class="condition-num">Agent ${i + 1}</span>
+          <button class="btn-sm" onclick="removeCondition(${i})">del</button>
+        </div>
+        <select class="cond-select" onchange="updateCondType(${i}, this.value)">${typeOptions}</select>
+        <input type="text" class="cond-input wide" value="${cond.description || ''}" placeholder="Describe this condition..." onchange="updateCondField(${i}, 'description', this.value)">
+        ${extraFields}
+      </div>
+    `;
+  }).join('');
+
+  els.btnAddCondition.style.display = currentConditions.length >= 5 ? 'none' : 'block';
+}
+
+function updateCondType(index, type) {
+  currentConditions[index] = { ...currentConditions[index], type };
+  renderConditions();
+}
+
+function updateCondField(index, field, value) {
+  if (field === 'shortAbove' || field === 'longBelow' || field === 'leverage') {
+    currentConditions[index][field] = parseInt(value) || 0;
+  } else {
+    currentConditions[index][field] = value;
+  }
+}
+
+function removeCondition(index) {
+  currentConditions.splice(index, 1);
+  renderConditions();
+}
+
+// Make functions available globally for inline handlers
+window.updateCondType = updateCondType;
+window.updateCondField = updateCondField;
+window.removeCondition = removeCondition;
+
+els.btnAddCondition.addEventListener('click', () => {
+  if (currentConditions.length >= 5) return;
+  currentConditions.push({ type: 'rsi', description: '', shortAbove: 80, longBelow: 25 });
+  renderConditions();
+});
+
+els.btnSaveConditions.addEventListener('click', async () => {
+  if (!selectedStrategyId) return;
+  await api(`/api/strategies/${selectedStrategyId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ conditions: currentConditions }),
+  });
+  addWorkflowEntry({ type: 'system', title: 'Conditions saved', detail: `${currentConditions.length} conditions configured`, timestamp: Date.now() });
+});
+
+// ---------- Voice Analysis ----------
+els.btnVoiceAnalysis.addEventListener('click', async () => {
+  els.voiceOverlay.style.display = 'flex';
+  els.voiceStatus.textContent = 'Generating analysis...';
+  els.voiceText.textContent = '';
+
+  try {
+    const res = await fetch('/api/voice/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+    });
+
+    const contentType = res.headers.get('content-type');
+
+    if (contentType && contentType.includes('audio/mpeg')) {
+      // Got audio — play it
+      const textB64 = res.headers.get('X-Voice-Text');
+      if (textB64) {
+        els.voiceText.textContent = atob(textB64);
+      }
+      els.voiceStatus.textContent = 'Playing analysis...';
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.play();
+      audio.onended = () => {
+        els.voiceStatus.textContent = 'Analysis complete';
+        URL.revokeObjectURL(url);
+      };
+    } else {
+      // JSON response (no audio)
+      const data = await res.json();
+      els.voiceText.textContent = data.text || 'No analysis available';
+      els.voiceStatus.textContent = data.audio === null ? 'Text only (ElevenLabs not configured)' : 'Analysis complete';
+    }
+  } catch (err) {
+    els.voiceStatus.textContent = 'Error generating analysis';
+    els.voiceText.textContent = err.message;
+  }
+});
+
+els.btnCloseVoice.addEventListener('click', () => {
+  els.voiceOverlay.style.display = 'none';
+});
+
+// ---------- Strategies ----------
 async function loadStrategies() {
   strategies = await api('/api/strategies');
+  if (!Array.isArray(strategies)) strategies = [];
   renderStrategies();
 }
 
 function renderStrategies() {
   if (strategies.length === 0) {
     els.strategyList.innerHTML = '<div style="color: var(--text-dim); font-size: 11px; padding: 4px;">No strategies yet</div>';
+    els.conditionsSection.style.display = 'none';
     return;
   }
   els.strategyList.innerHTML = strategies.map((s) => `
     <div class="strategy-item ${selectedStrategyId === s.id ? 'selected' : ''}" onclick="selectStrategy(${s.id})">
       <div>
         <span class="name">${s.name}</span>
-        <div class="meta">PnL: ${parseFloat(s.pnl_total || 0).toFixed(2)}%</div>
+        <div class="meta">PnL: ${parseFloat(s.pnl_total || 0).toFixed(2)}% | ${(s.conditions || []).length} conditions</div>
       </div>
       <div class="actions">
         <button class="btn-sm" onclick="event.stopPropagation(); deleteStrategy(${s.id})">del</button>
@@ -375,7 +535,20 @@ function selectStrategy(id) {
   renderStrategies();
   updateSessionButtons();
   loadPerformance();
+
+  // Load conditions for selected strategy
+  const strat = strategies.find(s => s.id === id);
+  if (strat) {
+    let conds = strat.conditions || [];
+    if (typeof conds === 'string') {
+      try { conds = JSON.parse(conds); } catch { conds = []; }
+    }
+    currentConditions = Array.isArray(conds) ? conds : [];
+    els.conditionsSection.style.display = 'block';
+    renderConditions();
+  }
 }
+window.selectStrategy = selectStrategy;
 
 els.btnCreateStrategy.addEventListener('click', async () => {
   const name = els.strategyName.value.trim();
@@ -390,9 +563,13 @@ els.btnCreateStrategy.addEventListener('click', async () => {
 
 async function deleteStrategy(id) {
   await api(`/api/strategies/${id}`, { method: 'DELETE' });
-  if (selectedStrategyId === id) selectedStrategyId = null;
+  if (selectedStrategyId === id) {
+    selectedStrategyId = null;
+    els.conditionsSection.style.display = 'none';
+  }
   loadStrategies();
 }
+window.deleteStrategy = deleteStrategy;
 
 // Session
 els.btnStartSession.addEventListener('click', async () => {
@@ -414,27 +591,34 @@ els.btnStopSession.addEventListener('click', async () => {
   await api('/api/session/stop', { method: 'POST' });
 });
 
-// Agents
-const AGENT_NAMES = ['confluence', 'microTrend', 'macroTrend', 'rsi', 'ict', 'finalDecision', 'exit', 'data'];
-const AGENT_LABELS_FULL = {
-  confluence: 'Confluence', microTrend: 'Micro Trend', macroTrend: 'Macro Trend',
-  rsi: 'RSI', ict: 'ICT', finalDecision: 'Decision', exit: 'Exit', data: 'Data',
-};
-
+// ---------- Agents ----------
 function renderAgents(statuses) {
-  els.agentList.innerHTML = AGENT_NAMES.map((name) => {
-    const status = statuses?.[name];
-    const hasOutput = !!status?.lastOutput;
+  if (!statuses) return;
+  const agentEntries = Object.entries(statuses);
+  els.agentList.innerHTML = agentEntries.map(([name, status]) => {
     const lo = status?.lastOutput;
+    let label = name;
+    if (name.startsWith('condition_')) {
+      const num = name.split('_')[1];
+      label = `Agent ${num}`;
+      if (status.conditionType && status.conditionType !== 'unconfigured') {
+        label += ` (${status.conditionType})`;
+      }
+    } else {
+      const labels = { finalDecision: 'Decision', exit: 'Exit', data: 'Data', rsi: 'RSI' };
+      label = labels[name] || name;
+    }
+
     let scoreText = '';
-    if (hasOutput && lo?.longScore !== undefined) {
+    if (lo?.longScore !== undefined) {
       scoreText = `${lo.longScore}L/${lo.shortScore}S`;
     }
+
     return `
       <div class="agent-row">
-        <span class="agent-name">${AGENT_LABELS_FULL[name]}</span>
+        <span class="agent-name">${label}</span>
         ${scoreText ? `<span class="agent-badge active">${scoreText}</span>` :
-          `<span class="agent-badge ${hasOutput ? 'active' : 'idle'}">${hasOutput ? 'active' : 'idle'}</span>`}
+          `<span class="agent-badge ${lo ? 'active' : 'idle'}">${lo ? 'active' : 'idle'}</span>`}
       </div>
     `;
   }).join('');
@@ -485,13 +669,11 @@ async function checkSessionStatus() {
       els.sessionStatus.textContent = 'Running';
       els.sessionStatus.style.color = 'var(--success)';
       setBotIndicator(true);
-      // Auto-select the active strategy so controls work after navigation
       if (status.activeStrategyId) {
         selectedStrategyId = status.activeStrategyId;
         localStorage.setItem('selectedStrategyId', status.activeStrategyId);
         renderStrategies();
       }
-      // Replay workflow history from server
       if (status.workflowHistory && status.workflowHistory.length > 0) {
         clearWorkflow();
         status.workflowHistory.forEach(entry => addWorkflowEntry(entry));
@@ -509,12 +691,8 @@ async function checkSessionStatus() {
 async function loadInitialChartData() {
   try {
     const data = await api('/api/chart/btcusdt/15m');
-    if (data.candles) {
-      updateCharts(data.candles);
-    }
-  } catch (e) {
-    console.log('Chart data not available yet');
-  }
+    if (data.candles) updateCharts(data.candles);
+  } catch (e) {}
 }
 
 // Init
@@ -529,13 +707,21 @@ async function init() {
   await checkExchange();
   await loadInitialChartData();
 
+  // Auto-select strategy and load conditions
+  if (selectedStrategyId) {
+    const strat = strategies.find(s => s.id === selectedStrategyId);
+    if (strat) {
+      selectStrategy(selectedStrategyId);
+    }
+  }
+
   api('/api/exchange/connect', { method: 'POST' }).then(() => checkExchange());
 
   setInterval(loadAgentStatuses, 30000);
   setInterval(loadPerformance, 30000);
   setInterval(loadDashboardSummary, 30000);
   setInterval(checkExchange, 60000);
-  setInterval(loadInitialChartData, 60000); // Refresh chart every minute
+  setInterval(loadInitialChartData, 60000);
 }
 
 init();

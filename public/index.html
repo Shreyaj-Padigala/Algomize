@@ -24,6 +24,7 @@
         <a href="/trades.html" class="nav-link">Trade Log</a>
         <div class="connection-dot" id="connectionDot"></div>
         <span id="statusText" class="status-text">Disconnected</span>
+        <button class="btn-logout" id="btnLogout" title="Logout">&#x2715;</button>
       </div>
     </div>
   </header>
@@ -40,6 +41,19 @@
             <button id="btnCreateStrategy" class="btn-action">Create</button>
           </div>
           <div id="strategyList" class="strategy-list"></div>
+        </div>
+
+        <!-- Strategy Conditions Editor -->
+        <div class="sidebar-section" id="conditionsSection" style="display: none;">
+          <div class="section-header">
+            <span class="section-icon">&amp;</span><span>Conditions (5 max)</span>
+          </div>
+          <div class="conditions-info">
+            Define up to 5 conditions for your trading bot agents.
+          </div>
+          <div id="conditionsList" class="conditions-list"></div>
+          <button id="btnAddCondition" class="btn-action" style="width: 100%; margin-top: 6px;">+ Add Condition</button>
+          <button id="btnSaveConditions" class="btn-start" style="width: 100%; margin-top: 6px;">Save Conditions</button>
         </div>
 
         <div class="sidebar-section">
@@ -122,7 +136,16 @@
         <div class="workflow-panel">
           <div class="panel-header">
             <span class="panel-title">&gt; Workflow</span>
-            <span class="panel-badge" id="workflowCount">0 events</span>
+            <div class="panel-header-right">
+              <button class="voice-btn" id="btnVoiceAnalysis" title="Hear agent analysis">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+              </button>
+              <span class="panel-badge" id="workflowCount">0 events</span>
+            </div>
           </div>
           <div class="workflow-feed" id="workflowFeed">
             <div class="workflow-empty">
@@ -135,7 +158,7 @@
     </div>
   </main>
 
-  <!-- Signal Modal Overlay (outside layout so it's always on top) -->
+  <!-- Signal Modal Overlay -->
   <div class="signal-overlay" id="signalOverlay" style="display: none;">
     <div class="signal-modal">
       <div class="signal-header">ENTRY SIGNAL DETECTED</div>
@@ -153,6 +176,18 @@
           <button class="btn-yes" id="btnAcceptSignal">Yes, Enter Trade</button>
           <button class="btn-no" id="btnRejectSignal">No, Skip</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voice Analysis Overlay -->
+  <div class="voice-overlay" id="voiceOverlay" style="display: none;">
+    <div class="voice-modal">
+      <div class="voice-header">AGENT VOICE ANALYSIS</div>
+      <div class="voice-body">
+        <div class="voice-status" id="voiceStatus">Generating analysis...</div>
+        <div class="voice-text" id="voiceText"></div>
+        <button class="btn-action" id="btnCloseVoice" style="width: 100%; margin-top: 12px;">Close</button>
       </div>
     </div>
   </div>

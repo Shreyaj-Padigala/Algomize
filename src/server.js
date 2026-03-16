@@ -8,9 +8,11 @@ const path = require('path');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./config/swagger');
 const config = require('./config');
+const { authenticateToken } = require('./middleware/auth');
 
 // Routes
 const healthRouter = require('./routes/health');
+const authRouter = require('./routes/auth');
 const exchangeRouter = require('./routes/exchange');
 const marketRouter = require('./routes/market');
 const chartRouter = require('./routes/chart');
@@ -21,6 +23,7 @@ const createAgentRoutes = require('./routes/agents');
 const createAnalysisRoutes = require('./routes/analysis');
 const createSessionRoutes = require('./routes/session');
 const createDashboardRoutes = require('./routes/dashboard');
+const createVoiceRoutes = require('./routes/voice');
 
 // Orchestrator & WebSocket
 const Orchestrator = require('./agents/orchestrator');
@@ -37,6 +40,8 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
+
+// Static files
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // Swagger
@@ -45,18 +50,27 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // Initialize orchestrator
 const orchestrator = new Orchestrator(io);
 
-// Mount routes
+// Public routes (no auth required)
 app.use('/health', healthRouter);
-app.use('/api/exchange', exchangeRouter);
-app.use('/api/market', marketRouter);
-app.use('/api/chart', chartRouter);
-app.use('/api/strategies', strategiesRouter);
-app.use('/api/trades', tradesRouter);
-app.use('/api/history', historyRouter);
-app.use('/api/agents', createAgentRoutes(orchestrator));
-app.use('/api/analysis', createAnalysisRoutes(orchestrator));
-app.use('/api/session', createSessionRoutes(orchestrator));
-app.use('/api/dashboard', createDashboardRoutes(orchestrator));
+app.use('/api/auth', authRouter);
+
+// Serve login page
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'login.html'));
+});
+
+// Protected routes (JWT auth required)
+app.use('/api/exchange', authenticateToken, exchangeRouter);
+app.use('/api/market', authenticateToken, marketRouter);
+app.use('/api/chart', authenticateToken, chartRouter);
+app.use('/api/strategies', authenticateToken, strategiesRouter);
+app.use('/api/trades', authenticateToken, tradesRouter);
+app.use('/api/history', authenticateToken, historyRouter);
+app.use('/api/agents', authenticateToken, createAgentRoutes(orchestrator));
+app.use('/api/analysis', authenticateToken, createAnalysisRoutes(orchestrator));
+app.use('/api/session', authenticateToken, createSessionRoutes(orchestrator));
+app.use('/api/dashboard', authenticateToken, createDashboardRoutes(orchestrator));
+app.use('/api/voice', authenticateToken, createVoiceRoutes(orchestrator));
 
 // Socket.io connection handling
 io.on('connection', (socket) => {

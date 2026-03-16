@@ -3,6 +3,8 @@ const pool = require('./pool');
 const migration = `
   CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
     blofin_api_key VARCHAR(255),
     blofin_api_secret VARCHAR(255),
     blofin_passphrase VARCHAR(255),
@@ -12,12 +14,14 @@ const migration = `
 
   CREATE TABLE IF NOT EXISTS strategies (
     id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     symbol VARCHAR(50) DEFAULT 'BTC-USDT',
     leverage INTEGER DEFAULT 1,
     session_active BOOLEAN DEFAULT FALSE,
     pnl_total NUMERIC(20, 8) DEFAULT 0,
     rules JSONB DEFAULT '{}',
+    conditions JSONB DEFAULT '[]',
     created_at TIMESTAMP DEFAULT NOW()
   );
 

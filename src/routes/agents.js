@@ -12,8 +12,8 @@ function createAgentRoutes(orchestrator) {
    */
   router.get('/', (req, res) => {
     const agents = [
-      'confluence', 'data', 'microTrend', 'macroTrend',
-      'rsi', 'ict', 'finalDecision', 'exit',
+      'condition_1', 'condition_2', 'condition_3', 'condition_4', 'condition_5',
+      'data', 'finalDecision', 'exit',
     ];
     res.json(agents.map((name) => ({ name, description: `${name} agent` })));
   });

@@ -2,33 +2,20 @@ class FinalDecisionAgent {
   constructor() {
     this.name = 'finalDecision';
     this.lastOutput = null;
-    this.threshold = 6.5;
+    this.threshold = 6;
   }
 
-  async analyze({ confluence, microTrend, macroTrend, rsi, ict }) {
-    // Collect all agent scores
+  async analyze(agentScoresInput) {
+    // Accept either an object of { agentName: { longScore, shortScore } }
+    // or the old format with named keys
     const agentScores = {};
     const scoringAgents = [];
 
-    if (confluence) {
-      agentScores.confluence = { longScore: confluence.longScore, shortScore: confluence.shortScore };
-      scoringAgents.push(agentScores.confluence);
-    }
-    if (microTrend) {
-      agentScores.microTrend = { longScore: microTrend.longScore, shortScore: microTrend.shortScore };
-      scoringAgents.push(agentScores.microTrend);
-    }
-    if (macroTrend) {
-      agentScores.macroTrend = { longScore: macroTrend.longScore, shortScore: macroTrend.shortScore };
-      scoringAgents.push(agentScores.macroTrend);
-    }
-    if (rsi) {
-      agentScores.rsi = { longScore: rsi.longScore, shortScore: rsi.shortScore };
-      scoringAgents.push(agentScores.rsi);
-    }
-    if (ict) {
-      agentScores.ict = { longScore: ict.longScore, shortScore: ict.shortScore };
-      scoringAgents.push(agentScores.ict);
+    for (const [key, value] of Object.entries(agentScoresInput)) {
+      if (value && typeof value.longScore === 'number' && typeof value.shortScore === 'number') {
+        agentScores[key] = { longScore: value.longScore, shortScore: value.shortScore };
+        scoringAgents.push(agentScores[key]);
+      }
     }
 
     // Calculate averages
@@ -47,14 +34,11 @@ class FinalDecisionAgent {
     const spread = Math.abs(avgLong - avgShort);
     const minSpread = 1.5;
 
-    // If avg long >= 6.5, long is stronger than short, and clear directional bias
     if (avgLong >= this.threshold && avgLong > avgShort && spread >= minSpread) {
       decision = 'open_long';
       side = 'buy';
       confidence = Math.min(avgLong / 10, 1);
-    }
-    // If avg short >= 6.5, short is stronger than long, and clear directional bias
-    else if (avgShort >= this.threshold && avgShort > avgLong && spread >= minSpread) {
+    } else if (avgShort >= this.threshold && avgShort > avgLong && spread >= minSpread) {
       decision = 'open_short';
       side = 'sell';
       confidence = Math.min(avgShort / 10, 1);

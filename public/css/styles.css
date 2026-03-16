@@ -860,6 +860,195 @@ main {
   overflow-y: auto;
 }
 
+/* Logout Button */
+.btn-logout {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 4px;
+}
+
+.btn-logout:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* Conditions Editor */
+.conditions-info {
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.conditions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.condition-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px;
+}
+
+.condition-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.condition-num {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.cond-select {
+  width: 100%;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  padding: 4px 6px;
+  font-size: 11px;
+  font-family: var(--mono);
+  margin-bottom: 4px;
+  outline: none;
+}
+
+.cond-select:focus {
+  border-color: var(--accent);
+}
+
+.cond-input {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: var(--mono);
+  outline: none;
+  width: 60px;
+}
+
+.cond-input.wide {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.cond-input:focus {
+  border-color: var(--accent);
+}
+
+.condition-extra {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--text-dim);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.condition-extra label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.condition-warning {
+  font-size: 9px;
+  color: var(--warning);
+  margin-top: 4px;
+  opacity: 0.8;
+}
+
+/* Voice Button */
+.panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice-btn {
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.voice-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* Voice Overlay */
+.voice-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.voice-modal {
+  width: 420px;
+  max-width: 90vw;
+  border: 2px solid var(--success);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.voice-header {
+  background: var(--success);
+  color: var(--bg-primary);
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-align: center;
+}
+
+.voice-body {
+  padding: 16px;
+}
+
+.voice-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.voice-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .layout {
