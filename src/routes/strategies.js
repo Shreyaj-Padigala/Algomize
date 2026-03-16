@@ -62,8 +62,8 @@ router.post('/', async (req, res) => {
 
     const strategy = result.rows[0];
 
-    // Create default agent entries for the 5 condition agents
-    const agentNames = ['condition_1', 'condition_2', 'condition_3', 'condition_4', 'condition_5', 'finalDecision', 'exit', 'data'];
+    // Create default agent entries
+    const agentNames = ['condition_1', 'condition_2', 'condition_3', 'entryDecision', 'exit', 'learn', 'data'];
     for (const agentName of agentNames) {
       await pool.query(
         'INSERT INTO strategy_agents (strategy_id, agent_name, is_active) VALUES ($1, $2, TRUE)',

@@ -36,24 +36,8 @@
           <div class="section-header">
             <span class="section-icon">$</span><span>Strategy</span>
           </div>
-          <div class="strategy-create">
-            <input type="text" id="strategyName" placeholder="Strategy name..." class="input-field">
-            <button id="btnCreateStrategy" class="btn-action">Create</button>
-          </div>
+          <button id="btnNewStrategy" class="btn-action" style="width: 100%; margin-bottom: 8px;">+ New Strategy</button>
           <div id="strategyList" class="strategy-list"></div>
-        </div>
-
-        <!-- Strategy Conditions Editor -->
-        <div class="sidebar-section" id="conditionsSection" style="display: none;">
-          <div class="section-header">
-            <span class="section-icon">&amp;</span><span>Conditions (5 max)</span>
-          </div>
-          <div class="conditions-info">
-            Define up to 5 conditions for your trading bot agents.
-          </div>
-          <div id="conditionsList" class="conditions-list"></div>
-          <button id="btnAddCondition" class="btn-action" style="width: 100%; margin-top: 6px;">+ Add Condition</button>
-          <button id="btnSaveConditions" class="btn-start" style="width: 100%; margin-top: 6px;">Save Conditions</button>
         </div>
 
         <div class="sidebar-section">
@@ -83,22 +67,10 @@
             <span class="section-icon">#</span><span>Performance</span>
           </div>
           <div class="perf-grid">
-            <div class="perf-item">
-              <span class="perf-label">Session PnL</span>
-              <span class="perf-value" id="sessionPnl">0.00%</span>
-            </div>
-            <div class="perf-item">
-              <span class="perf-label">Lifetime PnL</span>
-              <span class="perf-value" id="lifetimePnl">0.00%</span>
-            </div>
-            <div class="perf-item">
-              <span class="perf-label">Win Rate</span>
-              <span class="perf-value" id="winRate">0%</span>
-            </div>
-            <div class="perf-item">
-              <span class="perf-label">Trades</span>
-              <span class="perf-value" id="tradeCount">0</span>
-            </div>
+            <div class="perf-item"><span class="perf-label">Session PnL</span><span class="perf-value" id="sessionPnl">0.00%</span></div>
+            <div class="perf-item"><span class="perf-label">Lifetime PnL</span><span class="perf-value" id="lifetimePnl">0.00%</span></div>
+            <div class="perf-item"><span class="perf-label">Win Rate</span><span class="perf-value" id="winRate">0%</span></div>
+            <div class="perf-item"><span class="perf-label">Trades</span><span class="perf-value" id="tradeCount">0</span></div>
           </div>
         </div>
 
@@ -121,7 +93,6 @@
       </aside>
 
       <div class="main-content">
-        <!-- Chart -->
         <div class="charts-area">
           <div class="chart-container">
             <div class="chart-header">
@@ -132,7 +103,6 @@
           </div>
         </div>
 
-        <!-- Workflow -->
         <div class="workflow-panel">
           <div class="panel-header">
             <span class="panel-title">&gt; Workflow</span>
@@ -153,14 +123,59 @@
             </div>
           </div>
         </div>
-
       </div>
     </div>
   </main>
 
+  <!-- Strategy Creation Popup -->
+  <div class="modal-overlay" id="strategyModal" style="display: none;">
+    <div class="modal-card strategy-modal">
+      <div class="modal-header">CREATE NEW STRATEGY</div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Strategy Name</label>
+          <input type="text" class="form-input" id="modalStrategyName" placeholder="My BTC Strategy">
+        </div>
+
+        <div class="modal-divider"></div>
+        <div class="modal-section-title">Trading Conditions (3 Agent Rules)</div>
+        <p class="modal-hint">Describe each condition in plain English. Each agent will evaluate its condition on a 1-10 scale for long and short.</p>
+
+        <div class="form-group">
+          <label class="form-label">Condition 1</label>
+          <textarea class="form-textarea" id="modalCond1" placeholder="e.g. RSI over 80 means Short, RSI under 25 means Long"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Condition 2</label>
+          <textarea class="form-textarea" id="modalCond2" placeholder="e.g. If price is trending upwards then Long"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Condition 3</label>
+          <textarea class="form-textarea" id="modalCond3" placeholder="e.g. If price made major movements to the upside at this price, then Long"></textarea>
+        </div>
+
+        <div class="modal-divider"></div>
+        <div class="modal-section-title">Exit Strategy</div>
+        <p class="modal-hint">Describe when the bot should exit a trade. If left empty, defaults to: exit at +50% profit or -20% loss.</p>
+
+        <div class="form-group">
+          <label class="form-label">Exit Rules</label>
+          <textarea class="form-textarea" id="modalExitStrategy" placeholder="e.g. Exit if I get 50% on this trade or if I lose 20%"></textarea>
+        </div>
+
+        <div class="modal-error" id="modalError" style="display: none;"></div>
+
+        <div class="modal-actions">
+          <button class="btn-no" id="btnCancelStrategy">Cancel</button>
+          <button class="btn-yes" id="btnCreateStrategy">Create Strategy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Signal Modal Overlay -->
-  <div class="signal-overlay" id="signalOverlay" style="display: none;">
-    <div class="signal-modal">
+  <div class="modal-overlay" id="signalOverlay" style="display: none;">
+    <div class="modal-card signal-modal">
       <div class="signal-header">ENTRY SIGNAL DETECTED</div>
       <div class="signal-body">
         <div class="signal-detail">
@@ -181,8 +196,8 @@
   </div>
 
   <!-- Voice Analysis Overlay -->
-  <div class="voice-overlay" id="voiceOverlay" style="display: none;">
-    <div class="voice-modal">
+  <div class="modal-overlay" id="voiceOverlay" style="display: none;">
+    <div class="modal-card voice-modal">
       <div class="voice-header">AGENT VOICE ANALYSIS</div>
       <div class="voice-body">
         <div class="voice-status" id="voiceStatus">Generating analysis...</div>
