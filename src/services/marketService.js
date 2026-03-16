@@ -2,7 +2,7 @@ const exchangeService = require('./exchangeService');
 
 class MarketService {
   constructor() {
-    this.candleCache = { '15m': [], '1h': [] };
+    this.candleCache = { '15m': [], '1h': [], '4H': [] };
     this.lastPrice = null;
   }
 
