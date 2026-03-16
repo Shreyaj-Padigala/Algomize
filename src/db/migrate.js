@@ -3,12 +3,35 @@ const pool = require('./pool');
 const migration = `
   CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
+    email VARCHAR(255),
+    password_hash VARCHAR(255),
     blofin_api_key VARCHAR(255),
     blofin_api_secret VARCHAR(255),
     blofin_passphrase VARCHAR(255),
     portfolio_balance NUMERIC(20, 8) DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW()
   );
+
+  -- Add auth columns if upgrading from old schema
+  DO $$ BEGIN
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS email VARCHAR(255);
+  EXCEPTION WHEN others THEN NULL;
+  END $$;
+
+  DO $$ BEGIN
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+  EXCEPTION WHEN others THEN NULL;
+  END $$;
+
+  -- Add unique constraint on email if not exists
+  DO $$ BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint WHERE conname = 'users_email_key'
+    ) THEN
+      ALTER TABLE users ADD CONSTRAINT users_email_key UNIQUE (email);
+    END IF;
+  EXCEPTION WHEN others THEN NULL;
+  END $$;
 
   CREATE TABLE IF NOT EXISTS strategies (
     id SERIAL PRIMARY KEY,
@@ -20,6 +43,17 @@ const migration = `
     rules JSONB DEFAULT '{}',
     created_at TIMESTAMP DEFAULT NOW()
   );
+
+  -- Add new columns if upgrading from old schema
+  DO $$ BEGIN
+    ALTER TABLE strategies ADD COLUMN IF NOT EXISTS user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;
+  EXCEPTION WHEN others THEN NULL;
+  END $$;
+
+  DO $$ BEGIN
+    ALTER TABLE strategies ADD COLUMN IF NOT EXISTS conditions JSONB DEFAULT '[]';
+  EXCEPTION WHEN others THEN NULL;
+  END $$;
 
   CREATE TABLE IF NOT EXISTS strategy_agents (
     id SERIAL PRIMARY KEY,
@@ -52,14 +86,16 @@ const migration = `
   );
 `;
 
-async function migrate() {
+async function migrate(closePool = true) {
   try {
     await pool.query(migration);
     console.log('Database migration completed successfully.');
   } catch (err) {
     console.error('Migration failed:', err);
   } finally {
-    await pool.end();
+    if (closePool) {
+      await pool.end();
+    }
   }
 }
 

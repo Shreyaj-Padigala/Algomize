@@ -24,6 +24,7 @@
         <a href="/trades.html" class="nav-link">Trade Log</a>
         <div class="connection-dot" id="connectionDot"></div>
         <span id="statusText" class="status-text">Disconnected</span>
+        <button class="btn-logout" id="btnLogout" title="Logout">&#x2715;</button>
       </div>
     </div>
   </header>
@@ -35,10 +36,7 @@
           <div class="section-header">
             <span class="section-icon">$</span><span>Strategy</span>
           </div>
-          <div class="strategy-create">
-            <input type="text" id="strategyName" placeholder="Strategy name..." class="input-field">
-            <button id="btnCreateStrategy" class="btn-action">Create</button>
-          </div>
+          <button id="btnNewStrategy" class="btn-action" style="width: 100%; margin-bottom: 8px;">+ New Strategy</button>
           <div id="strategyList" class="strategy-list"></div>
         </div>
 
@@ -69,22 +67,10 @@
             <span class="section-icon">#</span><span>Performance</span>
           </div>
           <div class="perf-grid">
-            <div class="perf-item">
-              <span class="perf-label">Session PnL</span>
-              <span class="perf-value" id="sessionPnl">0.00%</span>
-            </div>
-            <div class="perf-item">
-              <span class="perf-label">Lifetime PnL</span>
-              <span class="perf-value" id="lifetimePnl">0.00%</span>
-            </div>
-            <div class="perf-item">
-              <span class="perf-label">Win Rate</span>
-              <span class="perf-value" id="winRate">0%</span>
-            </div>
-            <div class="perf-item">
-              <span class="perf-label">Trades</span>
-              <span class="perf-value" id="tradeCount">0</span>
-            </div>
+            <div class="perf-item"><span class="perf-label">Session PnL</span><span class="perf-value" id="sessionPnl">0.00%</span></div>
+            <div class="perf-item"><span class="perf-label">Lifetime PnL</span><span class="perf-value" id="lifetimePnl">0.00%</span></div>
+            <div class="perf-item"><span class="perf-label">Win Rate</span><span class="perf-value" id="winRate">0%</span></div>
+            <div class="perf-item"><span class="perf-label">Trades</span><span class="perf-value" id="tradeCount">0</span></div>
           </div>
         </div>
 
@@ -107,7 +93,6 @@
       </aside>
 
       <div class="main-content">
-        <!-- Chart -->
         <div class="charts-area">
           <div class="chart-container">
             <div class="chart-header">
@@ -118,11 +103,19 @@
           </div>
         </div>
 
-        <!-- Workflow -->
         <div class="workflow-panel">
           <div class="panel-header">
             <span class="panel-title">&gt; Workflow</span>
-            <span class="panel-badge" id="workflowCount">0 events</span>
+            <div class="panel-header-right">
+              <button class="voice-btn" id="btnVoiceAnalysis" title="Hear agent analysis">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+              </button>
+              <span class="panel-badge" id="workflowCount">0 events</span>
+            </div>
           </div>
           <div class="workflow-feed" id="workflowFeed">
             <div class="workflow-empty">
@@ -130,14 +123,59 @@
             </div>
           </div>
         </div>
-
       </div>
     </div>
   </main>
 
-  <!-- Signal Modal Overlay (outside layout so it's always on top) -->
-  <div class="signal-overlay" id="signalOverlay" style="display: none;">
-    <div class="signal-modal">
+  <!-- Strategy Creation Popup -->
+  <div class="modal-overlay" id="strategyModal" style="display: none;">
+    <div class="modal-card strategy-modal">
+      <div class="modal-header">CREATE NEW STRATEGY</div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="form-label">Strategy Name</label>
+          <input type="text" class="form-input" id="modalStrategyName" placeholder="My BTC Strategy">
+        </div>
+
+        <div class="modal-divider"></div>
+        <div class="modal-section-title">Trading Conditions (3 Agent Rules)</div>
+        <p class="modal-hint">Describe each condition in plain English. Each agent will evaluate its condition on a 1-10 scale for long and short.</p>
+
+        <div class="form-group">
+          <label class="form-label">Condition 1</label>
+          <textarea class="form-textarea" id="modalCond1" placeholder="e.g. RSI over 80 means Short, RSI under 25 means Long"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Condition 2</label>
+          <textarea class="form-textarea" id="modalCond2" placeholder="e.g. If price is trending upwards then Long"></textarea>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Condition 3</label>
+          <textarea class="form-textarea" id="modalCond3" placeholder="e.g. If price made major movements to the upside at this price, then Long"></textarea>
+        </div>
+
+        <div class="modal-divider"></div>
+        <div class="modal-section-title">Exit Strategy</div>
+        <p class="modal-hint">Describe when the bot should exit a trade. If left empty, defaults to: exit at +50% profit or -20% loss.</p>
+
+        <div class="form-group">
+          <label class="form-label">Exit Rules</label>
+          <textarea class="form-textarea" id="modalExitStrategy" placeholder="e.g. Exit if I get 50% on this trade or if I lose 20%"></textarea>
+        </div>
+
+        <div class="modal-error" id="modalError" style="display: none;"></div>
+
+        <div class="modal-actions">
+          <button class="btn-no" id="btnCancelStrategy">Cancel</button>
+          <button class="btn-yes" id="btnCreateStrategy">Create Strategy</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Signal Modal Overlay -->
+  <div class="modal-overlay" id="signalOverlay" style="display: none;">
+    <div class="modal-card signal-modal">
       <div class="signal-header">ENTRY SIGNAL DETECTED</div>
       <div class="signal-body">
         <div class="signal-detail">
@@ -153,6 +191,18 @@
           <button class="btn-yes" id="btnAcceptSignal">Yes, Enter Trade</button>
           <button class="btn-no" id="btnRejectSignal">No, Skip</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voice Analysis Overlay -->
+  <div class="modal-overlay" id="voiceOverlay" style="display: none;">
+    <div class="modal-card voice-modal">
+      <div class="voice-header">AGENT VOICE ANALYSIS</div>
+      <div class="voice-body">
+        <div class="voice-status" id="voiceStatus">Generating analysis...</div>
+        <div class="voice-text" id="voiceText"></div>
+        <button class="btn-action" id="btnCloseVoice" style="width: 100%; margin-top: 12px;">Close</button>
       </div>
     </div>
   </div>

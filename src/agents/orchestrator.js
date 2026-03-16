@@ -1,39 +1,51 @@
-const ConfluenceAgent = require('./confluenceAgent');
-const DataAgent = require('./dataAgent');
-const MicroTrendAgent = require('./microTrendAgent');
-const MacroTrendAgent = require('./macroTrendAgent');
-const RSIAgent = require('./rsiAgent');
-const ICTAgent = require('./ictAgent');
-const FinalDecisionAgent = require('./finalDecisionAgent');
+const ConditionOneAgent = require('./conditionOneAgent');
+const ConditionTwoAgent = require('./conditionTwoAgent');
+const ConditionThreeAgent = require('./conditionThreeAgent');
+const EntryDecisionAgent = require('./entryDecisionAgent');
 const ExitAgent = require('./exitAgent');
+const LearnAgent = require('./learnAgent');
+const DataAgent = require('./dataAgent');
 const marketService = require('../services/marketService');
 const pool = require('../db/pool');
 
+/**
+ * Orchestrator — coordinates all agents in a 60-second workflow loop.
+ *
+ * Agents:
+ * 1. ConditionOneAgent   — evaluates user's condition 1 (1-10 long/short)
+ * 2. ConditionTwoAgent   — evaluates user's condition 2 (1-10 long/short)
+ * 3. ConditionThreeAgent — evaluates user's condition 3 (1-10 long/short)
+ * 4. EntryDecisionAgent  — averages scores, decides entry (spread > 2, avg > 6)
+ * 5. ExitAgent           — monitors open trade, exits per user's exit strategy
+ * 6. LearnAgent          — analyzes trade history, refines strategy over time
+ * 7. DataAgent           — tracks stats, logs trades to DB/CSV
+ */
 class Orchestrator {
   constructor(io) {
     this.io = io;
-    this.agents = {
-      confluence: new ConfluenceAgent(),
-      data: new DataAgent(),
-      microTrend: new MicroTrendAgent(),
-      macroTrend: new MacroTrendAgent(),
-      rsi: new RSIAgent(),
-      ict: new ICTAgent(),
-      finalDecision: new FinalDecisionAgent(),
-      exit: new ExitAgent(),
-    };
+
+    this.conditionOne = new ConditionOneAgent();
+    this.conditionTwo = new ConditionTwoAgent();
+    this.conditionThree = new ConditionThreeAgent();
+    this.entryDecision = new EntryDecisionAgent();
+    this.exitAgent = new ExitAgent();
+    this.learnAgent = new LearnAgent();
+    this.dataAgent = new DataAgent();
+
     this.activeStrategy = null;
+    this.conditions = [];     // User's 3 condition descriptions
+    this.exitStrategy = '';   // User's exit strategy text
     this.sessionTimer = null;
     this.workflowInterval = null;
     this.running = false;
-    this.enabledAgents = new Set(Object.keys(this.agents));
     this.lastCycleResults = {};
     this.consecutiveLosses = 0;
     this.maxConsecutiveLosses = 3;
     this.pendingSignal = null;
     this.currentTrade = null;
     this.tradeLog = [];
-    this.workflowHistory = []; // Buffer for workflow events
+    this.workflowHistory = [];
+  }
 
   async startSession(strategyId) {
     if (this.running) {
@@ -50,15 +62,23 @@ class Orchestrator {
     this.tradeLog = [];
     this.workflowHistory = [];
 
-    const agentResult = await pool.query(
-      'SELECT * FROM strategy_agents WHERE strategy_id = $1',
-      [strategyId]
-    );
-    if (agentResult.rows.length > 0) {
-      this.enabledAgents = new Set(
-        agentResult.rows.filter((a) => a.is_active).map((a) => a.agent_name)
-      );
-    }
+    // Parse conditions from strategy
+    this.conditions = [];
+    this.exitStrategy = '';
+    try {
+      let conds = this.activeStrategy.conditions;
+      if (typeof conds === 'string') conds = JSON.parse(conds);
+      if (Array.isArray(conds)) {
+        this.conditions = conds.map(c => (typeof c === 'string' ? c : c.description || ''));
+      }
+    } catch { /* empty */ }
+
+    // Parse exit strategy from strategy rules
+    try {
+      let rules = this.activeStrategy.rules;
+      if (typeof rules === 'string') rules = JSON.parse(rules);
+      if (rules && rules.exitStrategy) this.exitStrategy = rules.exitStrategy;
+    } catch { /* empty */ }
 
     await pool.query('UPDATE strategies SET session_active = TRUE WHERE id = $1', [strategyId]);
 
@@ -69,7 +89,8 @@ class Orchestrator {
 
     this.running = true;
     this._emit('session:update', { status: 'started', strategyId, sessionId: session.rows[0].id });
-    this._emitWorkflow('system', 'Bot started', `Strategy: ${this.activeStrategy.name} | Looking for entry signals...`);
+    this._emitWorkflow('system', 'Bot started',
+      `Strategy: ${this.activeStrategy.name} | ${this.conditions.filter(Boolean).length} conditions | Looking for entry signals...`);
 
     this.workflowInterval = setInterval(() => this._runWorkflow(), 60000);
     this._runWorkflow();
@@ -130,11 +151,11 @@ class Orchestrator {
 
       // Send chart data to frontend
       this._emit('chart:data', {
-        candles15m: candles15m.slice(-192), // ~2 days of 15m candles
-        candles1h: candles1h.slice(-48),    // 2 days of 1h candles
+        candles15m: candles15m.slice(-192),
+        candles1h: candles1h.slice(-48),
       });
 
-      // Check for open trades first to determine workflow mode
+      // Check for open trades
       const openTrades = await pool.query(
         "SELECT * FROM trades WHERE strategy_id = $1 AND result = 'open'",
         [this.activeStrategy.id]
@@ -143,142 +164,119 @@ class Orchestrator {
       const hasOpenTrade = openTrades.rows.length > 0;
       const results = {};
 
-      // If we have an open trade, only run exit analysis — skip entry agents
-      if (hasOpenTrade && this.enabledAgents.has('exit')) {
-        // Still need RSI for exit agent divergence checks
-        if (this.enabledAgents.has('rsi')) {
-          results.rsi = await this.agents.rsi.analyze(candles15m);
-          this._emitWorkflow('agent', 'RSI',
-            `RSI: ${results.rsi.currentRSI}, ${results.rsi.divLabel}`);
-          this._emit('agent:update', { agent: 'rsi', data: this._summarizeAgent('rsi', results.rsi) });
-        }
-
+      // ===== EXIT MODE =====
+      if (hasOpenTrade) {
         const openTrade = openTrades.rows[0];
-        results.exit = await this.agents.exit.analyze({
+
+        results.exit = await this.exitAgent.analyze({
           openTrade,
           candles15m,
-          rsiData: results.rsi,
+          exitStrategy: this.exitStrategy,
         });
-        this._emit('agent:update', { agent: 'exit', data: this._summarizeAgent('exit', results.exit) });
+
+        this._emit('agent:update', { agent: 'exit', data: {
+          shouldClose: results.exit.shouldClose,
+          triggers: results.exit.triggers,
+          pnl: results.exit.leveragedPnlPercent,
+          elapsed: results.exit.elapsed,
+          takeProfitPct: results.exit.takeProfitPct,
+          stopLossPct: results.exit.stopLossPct,
+        }});
 
         if (results.exit.shouldClose) {
           this._emitWorkflow('exit', 'Exit signal triggered',
             `Triggers: ${results.exit.triggers.join(', ')} | PnL: ${results.exit.leveragedPnlPercent.toFixed(2)}%`);
           await this._closeTrade(openTrade, results.exit);
         } else {
-          const entryPrice = parseFloat(openTrade.entry_price);
-          const side = openTrade.side;
-          const priceDiff = side === 'buy' ? currentPrice - entryPrice : entryPrice - currentPrice;
-          const pnlPercent = (priceDiff / entryPrice * 100 * 100).toFixed(2);
+          const pnl = results.exit.leveragedPnlPercent;
           this._emitWorkflow('holding', 'Position open',
-            `${side.toUpperCase()} from $${entryPrice.toLocaleString()} | Current: $${currentPrice.toLocaleString()} | PnL: ${pnlPercent}%`);
+            `${openTrade.side.toUpperCase()} from $${parseFloat(openTrade.entry_price).toLocaleString()} | Current: $${currentPrice.toLocaleString()} | PnL: ${pnl.toFixed(2)}% | TP: ${results.exit.takeProfitPct}% SL: -${results.exit.stopLossPct}%`);
         }
       }
 
-      // Only run entry agents when NOT in a trade and no pending signal
+      // ===== ENTRY MODE =====
       if (!hasOpenTrade && !this.pendingSignal) {
-        const agentTasks = [];
+        // Run 3 condition agents in parallel
+        const [c1, c2, c3] = await Promise.all([
+          this.conditionOne.analyze(candles15m, candles1h, this.conditions[0] || ''),
+          this.conditionTwo.analyze(candles15m, candles1h, this.conditions[1] || ''),
+          this.conditionThree.analyze(candles15m, candles1h, this.conditions[2] || ''),
+        ]);
 
-        if (this.enabledAgents.has('rsi')) {
-          agentTasks.push(
-            this.agents.rsi.analyze(candles15m).then(r => {
-              results.rsi = r;
-              this._emitWorkflow('agent', 'RSI',
-                `RSI: ${r.currentRSI}, ${r.divLabel} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-              this._emit('agent:update', { agent: 'rsi', data: this._summarizeAgent('rsi', r) });
-            })
-          );
+        results.condition1 = c1;
+        results.condition2 = c2;
+        results.condition3 = c3;
+
+        // Emit each agent's result
+        if (this.conditions[0]) {
+          this._emitWorkflow('agent', 'Agent 1',
+            `${c1.summary} — ${c1.longScore}/10 Long ${c1.shortScore}/10 Short`);
+          this._emit('agent:update', { agent: 'condition_1', data: { longScore: c1.longScore, shortScore: c1.shortScore, summary: c1.summary } });
+        }
+        if (this.conditions[1]) {
+          this._emitWorkflow('agent', 'Agent 2',
+            `${c2.summary} — ${c2.longScore}/10 Long ${c2.shortScore}/10 Short`);
+          this._emit('agent:update', { agent: 'condition_2', data: { longScore: c2.longScore, shortScore: c2.shortScore, summary: c2.summary } });
+        }
+        if (this.conditions[2]) {
+          this._emitWorkflow('agent', 'Agent 3',
+            `${c3.summary} — ${c3.longScore}/10 Long ${c3.shortScore}/10 Short`);
+          this._emit('agent:update', { agent: 'condition_3', data: { longScore: c3.longScore, shortScore: c3.shortScore, summary: c3.summary } });
         }
 
-        if (this.enabledAgents.has('microTrend')) {
-          agentTasks.push(
-            this.agents.microTrend.analyze(candles15m).then(r => {
-              results.microTrend = r;
-              this._emitWorkflow('agent', 'Micro Trend (15m)',
-                `${r.pattern || r.trend} | EMA: ${r.emaTrend} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-              this._emit('agent:update', { agent: 'microTrend', data: this._summarizeAgent('microTrend', r) });
-            })
-          );
-        }
-
-        if (this.enabledAgents.has('macroTrend')) {
-          agentTasks.push(
-            this.agents.macroTrend.analyze(candles1h).then(r => {
-              results.macroTrend = r;
-              this._emitWorkflow('agent', 'Macro Trend (1h)',
-                `${r.pattern || r.macroTrend} | Bias: ${r.directionalBias} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-              this._emit('agent:update', { agent: 'macroTrend', data: this._summarizeAgent('macroTrend', r) });
-            })
-          );
-        }
-
-        if (this.enabledAgents.has('confluence')) {
-          agentTasks.push(
-            this.agents.confluence.analyze(candles15m, candles1h).then(r => {
-              results.confluence = r;
-              this._emitWorkflow('agent', 'Confluence',
-                `${r.proximitySignal === 'near_key_level' ? `Near key level (${r.nearbyLevels.length})` : 'Open space'} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-              this._emit('agent:update', { agent: 'confluence', data: this._summarizeAgent('confluence', r) });
-            })
-          );
-        }
-
-        if (this.enabledAgents.has('ict')) {
-          agentTasks.push(
-            this.agents.ict.analyze(candles15m, candles1h).then(r => {
-              results.ict = r;
-              this._emitWorkflow('agent', 'ICT',
-                `Zone: ${r.premiumDiscount?.zone || 'n/a'} | Sweeps: ${r.liquiditySweeps?.length || 0} — ${r.longScore}/10 Long ${r.shortScore}/10 Short`);
-              this._emit('agent:update', { agent: 'ict', data: this._summarizeAgent('ict', r) });
-            })
-          );
-        }
-
-        await Promise.all(agentTasks);
-      }
-
-      // Final Decision Agent (only if no open trade and no pending signal)
-      if (!hasOpenTrade && !this.pendingSignal && this.enabledAgents.has('finalDecision')) {
-        results.finalDecision = await this.agents.finalDecision.analyze({
-          confluence: results.confluence,
-          microTrend: results.microTrend,
-          macroTrend: results.macroTrend,
-          rsi: results.rsi,
-          ict: results.ict,
+        // Run entry decision
+        results.entryDecision = await this.entryDecision.analyze({
+          condition1: this.conditions[0] ? c1 : null,
+          condition2: this.conditions[1] ? c2 : null,
+          condition3: this.conditions[2] ? c3 : null,
         });
-        this._emit('agent:update', { agent: 'finalDecision', data: this._summarizeAgent('finalDecision', results.finalDecision) });
 
-        if (results.finalDecision.decision !== 'no_trade') {
+        this._emit('agent:update', { agent: 'entryDecision', data: {
+          decision: results.entryDecision.decision,
+          side: results.entryDecision.side,
+          avgLong: results.entryDecision.avgLongScore,
+          avgShort: results.entryDecision.avgShortScore,
+          spread: results.entryDecision.spread,
+          reason: results.entryDecision.reason,
+        }});
+
+        if (results.entryDecision.decision !== 'no_trade') {
           this._emitWorkflow('signal', 'ENTRY SIGNAL',
-            `${results.finalDecision.side === 'buy' ? 'LONG' : 'SHORT'} 100X | Avg Long: ${results.finalDecision.avgLongScore}/10 | Avg Short: ${results.finalDecision.avgShortScore}/10`);
+            `${results.entryDecision.side === 'buy' ? 'LONG' : 'SHORT'} 100X | Avg Long: ${results.entryDecision.avgLongScore}/10 | Avg Short: ${results.entryDecision.avgShortScore}/10 | Spread: ${results.entryDecision.spread}`);
 
           this.pendingSignal = {
-            ...results.finalDecision,
+            ...results.entryDecision,
             entryPrice: currentPrice,
             timestamp: Date.now(),
-            agentResults: results.finalDecision.agentScores,
+            agentResults: results.entryDecision.agentScores,
           };
 
           this._emit('signal:prompt', {
-            side: results.finalDecision.side,
-            confidence: results.finalDecision.confidence,
+            side: results.entryDecision.side,
+            confidence: results.entryDecision.confidence,
             entryPrice: currentPrice,
-            avgLongScore: results.finalDecision.avgLongScore,
-            avgShortScore: results.finalDecision.avgShortScore,
-            agentScores: results.finalDecision.agentScores,
+            avgLongScore: results.entryDecision.avgLongScore,
+            avgShortScore: results.entryDecision.avgShortScore,
+            spread: results.entryDecision.spread,
+            agentScores: results.entryDecision.agentScores,
+            reason: results.entryDecision.reason,
             message: 'Do you want to place this trade for 100X Leverage?',
           });
         } else {
           this._emitWorkflow('scan', 'No signal',
-            `Avg Long: ${results.finalDecision.avgLongScore}/10 | Avg Short: ${results.finalDecision.avgShortScore}/10 | Need: ${results.finalDecision.threshold}/10 — Waiting...`);
+            `${results.entryDecision.reason}`);
         }
       }
 
       // Data agent
-      if (this.enabledAgents.has('data')) {
-        results.data = await this.agents.data.analyze(this.activeStrategy.id);
-        this._emit('agent:update', { agent: 'data', data: this._summarizeAgent('data', results.data) });
-      }
+      results.data = await this.dataAgent.analyze(this.activeStrategy.id);
+      this._emit('agent:update', { agent: 'data', data: {
+        totalTrades: results.data.totalTrades,
+        wins: results.data.wins,
+        losses: results.data.losses,
+        winRate: results.data.winRate,
+        pnl: results.data.totalPnl,
+      }});
 
       this.lastCycleResults = results;
     } catch (err) {
@@ -289,10 +287,9 @@ class Orchestrator {
 
   async _openTrade(signal) {
     try {
-      const currentPrice = signal.entryPrice;
-      const trade = await this.agents.data.logTrade(this.activeStrategy.id, {
+      const trade = await this.dataAgent.logTrade(this.activeStrategy.id, {
         side: signal.side,
-        entry_price: currentPrice,
+        entry_price: signal.entryPrice,
         position_size: 1,
         leverage: 100,
         entry_time: new Date(),
@@ -313,7 +310,7 @@ class Orchestrator {
       const pnlPercent = exitResult.leveragedPnlPercent;
       const result = pnlPercent >= 0 ? 'win' : 'loss';
 
-      const updatedTrade = await this.agents.data.updateTrade(openTrade.id, {
+      const updatedTrade = await this.dataAgent.updateTrade(openTrade.id, {
         exit_price: currentPrice,
         exit_time: new Date(),
         pnl: pnlPercent,
@@ -333,6 +330,25 @@ class Orchestrator {
 
       this.currentTrade = null;
       this.tradeLog.push({ result, pnlPercent, triggers: exitResult.triggers });
+
+      // Run learn agent after each closed trade
+      this._emitWorkflow('agent', 'Learn Bot', 'Analyzing trade performance...');
+      const learnResult = await this.learnAgent.analyze(
+        this.activeStrategy.id,
+        { side: openTrade.side, pnl: pnlPercent, result },
+        this.conditions
+      );
+      if (learnResult.insight) {
+        this._emitWorkflow('agent', 'Learn Bot Insight', learnResult.insight);
+        if (learnResult.suggestion) {
+          this._emitWorkflow('agent', 'Learn Bot Suggestion', learnResult.suggestion);
+        }
+      }
+      this._emit('agent:update', { agent: 'learn', data: {
+        insight: learnResult.insight,
+        suggestion: learnResult.suggestion,
+        stats: learnResult.stats,
+      }});
 
       if (result === 'loss') {
         this.consecutiveLosses++;
@@ -361,67 +377,70 @@ class Orchestrator {
     }
   }
 
-  _summarizeAgent(name, data) {
-    switch (name) {
-      case 'confluence':
-        return {
-          signal: data.proximitySignal,
-          nearbyLevels: data.nearbyLevels?.length || 0,
-          longScore: data.longScore, shortScore: data.shortScore,
-        };
-      case 'microTrend':
-        return {
-          trend: data.trend, emaTrend: data.emaTrend, pattern: data.pattern,
-          longScore: data.longScore, shortScore: data.shortScore,
-        };
-      case 'macroTrend':
-        return {
-          trend: data.macroTrend, bias: data.directionalBias, pattern: data.pattern,
-          longScore: data.longScore, shortScore: data.shortScore,
-        };
-      case 'rsi':
-        return {
-          rsi: data.currentRSI, condition: data.condition, divLabel: data.divLabel,
-          longScore: data.longScore, shortScore: data.shortScore,
-        };
-      case 'ict':
-        return {
-          zone: data.premiumDiscount?.zone, sweeps: data.liquiditySweeps?.length || 0,
-          longScore: data.longScore, shortScore: data.shortScore,
-        };
-      case 'finalDecision':
-        return {
-          decision: data.decision, side: data.side,
-          avgLong: data.avgLongScore, avgShort: data.avgShortScore,
-          agentScores: data.agentScores,
-        };
-      case 'exit':
-        return {
-          shouldClose: data.shouldClose, triggers: data.triggers,
-          pnl: data.unrealizedPnl, elapsed: data.elapsed,
-        };
-      case 'data':
-        return {
-          totalTrades: data.totalTrades, wins: data.wins,
-          losses: data.losses, winRate: data.winRate, pnl: data.totalPnl,
-        };
-      default:
-        return data;
-    }
-  }
-
-  enableAgent(agentName) { this.enabledAgents.add(agentName); }
-  disableAgent(agentName) { this.enabledAgents.delete(agentName); }
-
   getAgentStatuses() {
-    const statuses = {};
-    for (const [name, agent] of Object.entries(this.agents)) {
-      statuses[name] = {
-        enabled: this.enabledAgents.has(name),
-        lastOutput: agent.lastOutput ? this._summarizeAgent(name, agent.lastOutput) : null,
-      };
-    }
-    return statuses;
+    return {
+      condition_1: {
+        enabled: true,
+        description: this.conditions[0] || '',
+        lastOutput: this.conditionOne.lastOutput ? {
+          longScore: this.conditionOne.lastOutput.longScore,
+          shortScore: this.conditionOne.lastOutput.shortScore,
+          summary: this.conditionOne.lastOutput.summary,
+        } : null,
+      },
+      condition_2: {
+        enabled: true,
+        description: this.conditions[1] || '',
+        lastOutput: this.conditionTwo.lastOutput ? {
+          longScore: this.conditionTwo.lastOutput.longScore,
+          shortScore: this.conditionTwo.lastOutput.shortScore,
+          summary: this.conditionTwo.lastOutput.summary,
+        } : null,
+      },
+      condition_3: {
+        enabled: true,
+        description: this.conditions[2] || '',
+        lastOutput: this.conditionThree.lastOutput ? {
+          longScore: this.conditionThree.lastOutput.longScore,
+          shortScore: this.conditionThree.lastOutput.shortScore,
+          summary: this.conditionThree.lastOutput.summary,
+        } : null,
+      },
+      entryDecision: {
+        enabled: true,
+        lastOutput: this.entryDecision.lastOutput ? {
+          decision: this.entryDecision.lastOutput.decision,
+          avgLong: this.entryDecision.lastOutput.avgLongScore,
+          avgShort: this.entryDecision.lastOutput.avgShortScore,
+          spread: this.entryDecision.lastOutput.spread,
+        } : null,
+      },
+      exit: {
+        enabled: true,
+        lastOutput: this.exitAgent.lastOutput ? {
+          shouldClose: this.exitAgent.lastOutput.shouldClose,
+          pnl: this.exitAgent.lastOutput.leveragedPnlPercent,
+          triggers: this.exitAgent.lastOutput.triggers,
+        } : null,
+      },
+      learn: {
+        enabled: true,
+        lastOutput: this.learnAgent.lastOutput ? {
+          insight: this.learnAgent.lastOutput.insight,
+          suggestion: this.learnAgent.lastOutput.suggestion,
+        } : null,
+      },
+      data: {
+        enabled: true,
+        lastOutput: this.dataAgent.lastOutput ? {
+          totalTrades: this.dataAgent.lastOutput.totalTrades,
+          wins: this.dataAgent.lastOutput.wins,
+          losses: this.dataAgent.lastOutput.losses,
+          winRate: this.dataAgent.lastOutput.winRate,
+          pnl: this.dataAgent.lastOutput.totalPnl,
+        } : null,
+      },
+    };
   }
 
   getStatus() {
@@ -429,7 +448,8 @@ class Orchestrator {
       running: this.running,
       activeStrategy: this.activeStrategy,
       activeStrategyId: this.activeStrategy?.id || null,
-      enabledAgents: [...this.enabledAgents],
+      conditions: this.conditions,
+      exitStrategy: this.exitStrategy,
       consecutiveLosses: this.consecutiveLosses,
       pendingSignal: this.pendingSignal ? {
         side: this.pendingSignal.side,
@@ -438,6 +458,7 @@ class Orchestrator {
         agentScores: this.pendingSignal.agentResults,
         avgLongScore: this.pendingSignal.avgLongScore,
         avgShortScore: this.pendingSignal.avgShortScore,
+        spread: this.pendingSignal.spread,
       } : null,
       hasPendingSignal: !!this.pendingSignal,
       workflowHistory: this.workflowHistory,
@@ -447,7 +468,6 @@ class Orchestrator {
   _emitWorkflow(type, title, detail) {
     const entry = { type, title, detail, timestamp: Date.now() };
     this.workflowHistory.push(entry);
-    // Keep last 200 entries to avoid memory bloat
     if (this.workflowHistory.length > 200) {
       this.workflowHistory = this.workflowHistory.slice(-200);
     }

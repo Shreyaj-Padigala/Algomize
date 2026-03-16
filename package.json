@@ -1,7 +1,7 @@
 {
   "name": "algomize",
-  "version": "1.0.0",
-  "description": "AI Agent-Based Crypto Trading Bot for BTC/USDT on BloFin",
+  "version": "2.0.0",
+  "description": "AI Agent-Based Crypto Trading Bot for BTC/USDT on BloFin with JWT Auth",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
@@ -20,7 +20,9 @@
   ],
   "license": "MIT",
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1009.0",
     "axios": "^1.7.2",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.5",
     "csv-parser": "^3.0.0",
     "csv-writer": "^1.6.0",
@@ -29,6 +31,7 @@
     "express-rate-limit": "^7.3.1",
     "groq-sdk": "^1.1.1",
     "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.0",
     "pg": "^8.12.0",
     "socket.io": "^4.7.5",
