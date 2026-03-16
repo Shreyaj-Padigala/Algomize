@@ -1,6 +1,7 @@
 const ConditionOneAgent = require('./conditionOneAgent');
 const ConditionTwoAgent = require('./conditionTwoAgent');
 const ConditionThreeAgent = require('./conditionThreeAgent');
+const ConditionEvaluator = require('./conditionEvaluator');
 const EntryDecisionAgent = require('./entryDecisionAgent');
 const ExitAgent = require('./exitAgent');
 const LearnAgent = require('./learnAgent');
@@ -145,14 +146,24 @@ class Orchestrator {
     try {
       this._emitWorkflow('scan', 'Scanning market', 'Fetching candle data...');
 
+      // Always fetch 15m (primary timeframe)
       const candles15m = await marketService.getCandles('15m', 200);
-      const candles1h = await marketService.getCandles('1h', 200);
       const currentPrice = candles15m[candles15m.length - 1].close;
+
+      // Only fetch higher timeframes if any condition requires macro data
+      const needsMacro = this.conditions.some(c => c && ConditionEvaluator.isMacroCondition(c));
+      let candles1h = null;
+      let candles4h = null;
+
+      if (needsMacro) {
+        candles1h = await marketService.getCandles('1h', 200);
+        try { candles4h = await marketService.getCandles('4H', 100); } catch { candles4h = candles1h; }
+      }
 
       // Send chart data to frontend
       this._emit('chart:data', {
         candles15m: candles15m.slice(-192),
-        candles1h: candles1h.slice(-48),
+        candles1h: candles1h ? candles1h.slice(-48) : [],
       });
 
       // Check for open trades
@@ -198,9 +209,9 @@ class Orchestrator {
       if (!hasOpenTrade && !this.pendingSignal) {
         // Run 3 condition agents in parallel
         const [c1, c2, c3] = await Promise.all([
-          this.conditionOne.analyze(candles15m, candles1h, this.conditions[0] || ''),
-          this.conditionTwo.analyze(candles15m, candles1h, this.conditions[1] || ''),
-          this.conditionThree.analyze(candles15m, candles1h, this.conditions[2] || ''),
+          this.conditionOne.analyze(candles15m, candles1h, candles4h, this.conditions[0] || ''),
+          this.conditionTwo.analyze(candles15m, candles1h, candles4h, this.conditions[1] || ''),
+          this.conditionThree.analyze(candles15m, candles1h, candles4h, this.conditions[2] || ''),
         ]);
 
         results.condition1 = c1;
