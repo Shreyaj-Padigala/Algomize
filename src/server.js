@@ -95,10 +95,13 @@ if (config.blofin.apiKey) {
   blofinWs.subscribeTrades();
 }
 
-// Start server
-server.listen(config.port, () => {
-  console.log(`Algomize server running on http://localhost:${config.port}`);
-  console.log(`API docs: http://localhost:${config.port}/api-docs`);
+// Auto-run database migration on startup, then start server
+const { migrate } = require('./db/migrate');
+migrate(false).then(() => {
+  server.listen(config.port, () => {
+    console.log(`Algomize server running on http://localhost:${config.port}`);
+    console.log(`API docs: http://localhost:${config.port}/api-docs`);
+  });
 });
 
 module.exports = { app, server };
