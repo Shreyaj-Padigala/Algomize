@@ -48,39 +48,10 @@ class ConditionEvaluator {
     // Choose candles based on macro flag
     const primaryCandles = candles15m;
     const macroCandles = isMacro ? (candles4h || candles1h || candles15m) : candles15m;
-    const closes = primaryCandles.map(c => c.close);
 
-    // Route to the right mathematical scorer
-    if (detected.includes('rsi') && !detected.includes('divergence')) {
-      return this._scoreRSI(closes, conditionText);
-    }
-    if (detected.includes('divergence')) {
-      return this._scoreDivergence(closes);
-    }
-    if (detected.includes('ema') || detected.includes('sma')) {
-      return this._scoreMovingAverage(closes, conditionText);
-    }
-    if (detected.includes('support_resistance')) {
-      return this._scoreSupportResistance(isMacro ? macroCandles : primaryCandles);
-    }
-    if (detected.includes('volume')) {
-      return this._scoreVolume(primaryCandles);
-    }
-    if (detected.includes('bos')) {
-      return this._scoreBOS(primaryCandles);
-    }
-    if (detected.includes('fvg')) {
-      return this._scoreFVG(primaryCandles);
-    }
-    if (detected.includes('trend')) {
-      return this._scoreTrend(isMacro ? macroCandles : primaryCandles, conditionText);
-    }
-    if (detected.includes('price_move')) {
-      return this._scorePriceChange(isMacro ? macroCandles : primaryCandles, conditionText);
-    }
-
-    // No math indicator detected — use AI for qualitative analysis
-    return this._evaluateWithAI(conditionText, primaryCandles, isMacro ? macroCandles : null);
+    // Always use AI-powered evaluation with pre-computed indicator data
+    // Math indicators are computed in code and passed as context to the AI
+    return this._evaluateWithAI(conditionText, primaryCandles, isMacro ? macroCandles : null, detected);
   }
 
   /**
@@ -466,11 +437,11 @@ class ConditionEvaluator {
 
   // ─── AI EVALUATION (qualitative conditions only) ───────────────
 
-  static async _evaluateWithAI(conditionText, candles15m, macroCandles) {
+  static async _evaluateWithAI(conditionText, candles15m, macroCandles, detected = []) {
     const closes = candles15m.map(c => c.close);
     const currentPrice = closes[closes.length - 1];
 
-    // Pre-compute indicators so AI doesn't have to
+    // Pre-compute ALL relevant indicators so AI has full context
     const rsiValues = indicatorService.calculateRSI(closes, 14);
     const currentRSI = rsiValues.length > 0 ? rsiValues[rsiValues.length - 1].toFixed(1) : 'N/A';
     const ema20 = indicatorService.calculateEMA(closes, 20);
@@ -478,6 +449,45 @@ class ConditionEvaluator {
     const ema50 = indicatorService.calculateEMA(closes, 50);
     const lastEma50 = ema50.length > 0 ? ema50[ema50.length - 1].toFixed(0) : 'N/A';
     const structure = indicatorService.detectMarketStructure(candles15m);
+
+    // Build extra indicator context based on what the condition mentions
+    let extraIndicators = '';
+
+    if (detected.includes('divergence')) {
+      const div = indicatorService.detectDivergence(closes, rsiValues, 10);
+      const hidden = indicatorService.detectHiddenDivergence(closes, rsiValues, 20);
+      extraIndicators += `\n- RSI Divergence: Bullish=${div.bullish}, Bearish=${div.bearish}, HiddenBull=${hidden.hiddenBullish}, HiddenBear=${hidden.hiddenBearish}`;
+    }
+
+    if (detected.includes('support_resistance')) {
+      const levels = indicatorService.findSupportResistance(candles15m);
+      const supports = levels.filter(l => l.type === 'support' && l.price < currentPrice).sort((a, b) => b.price - a.price);
+      const resistances = levels.filter(l => l.type === 'resistance' && l.price > currentPrice).sort((a, b) => a.price - b.price);
+      extraIndicators += `\n- Nearest Support: $${supports[0] ? supports[0].price.toFixed(0) : 'N/A'} | Nearest Resistance: $${resistances[0] ? resistances[0].price.toFixed(0) : 'N/A'}`;
+    }
+
+    if (detected.includes('volume') && candles15m.length >= 50) {
+      const avgVol = candles15m.slice(-50).reduce((s, c) => s + c.volume, 0) / 50;
+      const currentVol = candles15m[candles15m.length - 1].volume;
+      const ratio = (currentVol / avgVol).toFixed(1);
+      const priceDir = candles15m[candles15m.length - 1].close > candles15m[candles15m.length - 2].close ? 'up' : 'down';
+      extraIndicators += `\n- Volume: ${ratio}x average | Last candle direction: ${priceDir}`;
+    }
+
+    if (detected.includes('fvg')) {
+      const fvgs = indicatorService.findFairValueGaps(candles15m.slice(-30));
+      const bullFVG = fvgs.filter(f => f.type === 'bullish').length;
+      const bearFVG = fvgs.filter(f => f.type === 'bearish').length;
+      extraIndicators += `\n- Fair Value Gaps (last 30 candles): ${bullFVG} bullish, ${bearFVG} bearish`;
+    }
+
+    if (detected.includes('price_move')) {
+      const change5 = candles15m.length >= 5
+        ? ((currentPrice - candles15m[candles15m.length - 5].close) / candles15m[candles15m.length - 5].close * 100).toFixed(2) : '0';
+      const change20 = candles15m.length >= 20
+        ? ((currentPrice - candles15m[candles15m.length - 20].close) / candles15m[candles15m.length - 20].close * 100).toFixed(2) : '0';
+      extraIndicators += `\n- Price Change: 5-candle=${change5}%, 20-candle=${change20}%`;
+    }
 
     let macroContext = '';
     if (macroCandles && macroCandles !== candles15m) {
@@ -504,7 +514,7 @@ PRE-COMPUTED DATA (15m chart — all math already done, DO NOT recalculate):
 - EMA20: $${lastEma20} | EMA50: $${lastEma50}
 - Trend: ${structure.trend}
 - BOS: ${structure.bos ? structure.bos.type : 'none'}
-- Structures: ${structure.structures.slice(-5).map(s => s.type).join(', ') || 'none'}${macroContext}
+- Structures: ${structure.structures.slice(-5).map(s => s.type).join(', ') || 'none'}${extraIndicators}${macroContext}
 
 CHART (15m):
 ${chart}
@@ -526,8 +536,8 @@ RESPOND WITH ONLY THIS JSON (no markdown, no explanation outside JSON):
       // Validate AI actually returned usable scores
       if (typeof result.longScore !== 'number' || typeof result.shortScore !== 'number' ||
           isNaN(result.longScore) || isNaN(result.shortScore)) {
-        console.warn('AI returned invalid scores:', JSON.stringify(result));
-        return this._computedFallback(closes, candles15m);
+        console.warn('AI returned invalid scores, falling back to math:', JSON.stringify(result));
+        return this._mathFallback(detected, closes, candles15m, conditionText);
       }
 
       let longScore = Math.round(result.longScore);
@@ -540,7 +550,7 @@ RESPOND WITH ONLY THIS JSON (no markdown, no explanation outside JSON):
           longScore = Math.round((longScore / total) * 10);
           shortScore = 10 - longScore;
         } else {
-          return this._computedFallback(closes, candles15m);
+          return this._mathFallback(detected, closes, candles15m, conditionText);
         }
       }
 
@@ -558,9 +568,44 @@ RESPOND WITH ONLY THIS JSON (no markdown, no explanation outside JSON):
       return this._clamp(longScore, shortScore,
         result.summary || `AI: L${longScore}/S${shortScore}`);
     } catch (err) {
-      console.error('AI evaluation failed:', err.message);
-      return this._computedFallback(closes, candles15m);
+      console.error('Groq AI evaluation failed, using math fallback:', err.message);
+      return this._mathFallback(detected, closes, candles15m, conditionText);
     }
+  }
+
+  /**
+   * Math-only fallback used when Groq AI is unavailable.
+   * Routes to the best matching math scorer based on detected keywords.
+   */
+  static _mathFallback(detected, closes, candles, conditionText) {
+    if (detected.includes('rsi') && !detected.includes('divergence')) {
+      return this._scoreRSI(closes, conditionText);
+    }
+    if (detected.includes('divergence')) {
+      return this._scoreDivergence(closes);
+    }
+    if (detected.includes('ema') || detected.includes('sma')) {
+      return this._scoreMovingAverage(closes, conditionText);
+    }
+    if (detected.includes('support_resistance')) {
+      return this._scoreSupportResistance(candles);
+    }
+    if (detected.includes('volume')) {
+      return this._scoreVolume(candles);
+    }
+    if (detected.includes('bos')) {
+      return this._scoreBOS(candles);
+    }
+    if (detected.includes('fvg')) {
+      return this._scoreFVG(candles);
+    }
+    if (detected.includes('trend')) {
+      return this._scoreTrend(candles, conditionText);
+    }
+    if (detected.includes('price_move')) {
+      return this._scorePriceChange(candles, conditionText);
+    }
+    return this._computedFallback(closes, candles);
   }
 
   // ─── COMPUTED FALLBACK ─────────────────────────────────────────
