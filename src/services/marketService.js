@@ -26,6 +26,8 @@ class MarketService {
         close: parseFloat(c[4]),
         volume: parseFloat(c[5]),
       }));
+      // BloFin returns candles newest-first; sort ascending by timestamp
+      candles.sort((a, b) => a.timestamp - b.timestamp);
       this.candleCache[timeframe] = candles;
       return candles;
     }
