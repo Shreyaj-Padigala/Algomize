@@ -92,6 +92,27 @@ function playCashRegister() {
   } catch (e) {}
 }
 
+// ---------- Exit Bell Sound ----------
+function playExitBell() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    // Light bell: two soft sine tones
+    [[1200, 0, 0.6, 0.15], [900, 0.15, 0.8, 0.12]].forEach(([freq, start, dur, vol]) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(freq, now + start);
+      g.gain.setValueAtTime(vol, now + start);
+      g.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      o.connect(g).connect(ctx.destination);
+      o.start(now + start);
+      o.stop(now + start + dur);
+    });
+    setTimeout(() => ctx.close(), 1500);
+  } catch (e) {}
+}
+
 // ---------- Charts ----------
 function initCharts() {
   const priceContainer = document.getElementById('priceChart');
@@ -169,6 +190,7 @@ socket.on('chart:remove-entry-line', () => {
     entryPriceLine = null;
   }
 });
+socket.on('trade:exit-sound', () => { playExitBell(); });
 socket.on('agent:update', () => loadAgentStatuses());
 socket.on('trade:update', () => loadPerformance());
 socket.on('session:update', (d) => {

@@ -7,7 +7,6 @@ const ExitAgent = require('./exitAgent');
 const LearnAgent = require('./learnAgent');
 const DataAgent = require('./dataAgent');
 const marketService = require('../services/marketService');
-const exchangeService = require('../services/exchangeService');
 const pool = require('../db/pool');
 
 /**
@@ -290,59 +289,12 @@ class Orchestrator {
 
   async _openTrade(signal) {
     try {
-      const instId = 'BTC-USDT';
+      // Simulated trade — logged locally, not placed on BloFin
+      // External systems can read the app state to place real trades
+      const positionSize = 1; // Simulated size
 
-      // Set leverage to 100x before placing the trade
-      try {
-        await exchangeService.setLeverage(instId, 100);
-        this._emitWorkflow('trade', 'Leverage set', '100x leverage configured on BloFin');
-      } catch (levErr) {
-        console.error('Set leverage error:', levErr.message);
-        this._emitWorkflow('error', 'Leverage warning', `Could not set leverage: ${levErr.message}. Proceeding with current leverage.`);
-      }
-
-      // Get account balance and calculate 50% margin position size
-      let positionSize;
-      try {
-        const balanceResult = await exchangeService.getAccountBalance();
-        // BloFin balance response: { data: [{ currency: "USDT", available: "..." }] }
-        const usdtBalance = balanceResult?.data?.find(b => b.currency === 'USDT' || b.ccy === 'USDT');
-        const availableBalance = parseFloat(usdtBalance?.available || usdtBalance?.availBal || '0');
-
-        if (availableBalance <= 0) {
-          this._emitWorkflow('error', 'Trade failed', 'No available USDT balance in futures account');
-          return;
-        }
-
-        // 50% of available balance as margin
-        const marginUsdt = availableBalance * 0.5;
-        // With 100x leverage, notional = margin * 100
-        const notionalUsdt = marginUsdt * 100;
-        // Convert to BTC size
-        positionSize = Math.floor((notionalUsdt / signal.entryPrice) * 10000) / 10000; // 4 decimal places
-
-        // BloFin minimum order size for BTC-USDT is 0.01
-        if (positionSize < 0.01) positionSize = 0.01;
-
-        this._emitWorkflow('trade', 'Position sized',
-          `Balance: $${availableBalance.toFixed(2)} | 50% margin: $${marginUsdt.toFixed(2)} | Size: ${positionSize} BTC`);
-      } catch (balErr) {
-        console.error('Balance fetch error:', balErr.message);
-        this._emitWorkflow('error', 'Balance error', `Could not fetch balance: ${balErr.message}. Using minimum size.`);
-        positionSize = 0.01;
-      }
-
-      // Place the actual market order on BloFin
-      const orderResult = await exchangeService.placeOrder({
-        instId,
-        side: signal.side, // 'buy' for long, 'sell' for short
-        size: String(positionSize),
-        orderType: 'market',
-      });
-
-      const orderId = orderResult?.data?.[0]?.ordId || orderResult?.data?.ordId || 'confirmed';
-      this._emitWorkflow('trade', 'Order placed on BloFin',
-        `${signal.side.toUpperCase()} ${positionSize} BTC market order | Order ID: ${orderId}`);
+      this._emitWorkflow('trade', 'Trade logged (simulated)',
+        `${signal.side.toUpperCase()} at $${signal.entryPrice.toLocaleString()} | 100x Leverage | Not placed on exchange`);
 
       // Log trade to database
       const trade = await this.dataAgent.logTrade(this.activeStrategy.id, {
@@ -362,24 +314,20 @@ class Orchestrator {
       });
     } catch (err) {
       console.error('Trade open error:', err);
-      this._emitWorkflow('error', 'Trade open failed', `BloFin order failed: ${err.message}`);
+      this._emitWorkflow('error', 'Trade open failed', err.message);
     }
   }
 
   async _closeTrade(openTrade, exitResult) {
     try {
-      // Close the actual position on BloFin
-      const instId = 'BTC-USDT';
-      try {
-        await exchangeService.closePosition(instId);
-        this._emitWorkflow('trade', 'Position closed on BloFin', 'Exchange position closed successfully');
-      } catch (closeErr) {
-        console.error('BloFin close position error:', closeErr.message);
-        this._emitWorkflow('error', 'Exchange close warning', `Could not close on exchange: ${closeErr.message}`);
-      }
+      // Simulated close — logged locally, not closed on BloFin
+      this._emitWorkflow('trade', 'Position closed (simulated)', 'Trade exit logged');
 
       // Remove entry price line from chart
       this._emit('chart:remove-entry-line', {});
+
+      // Notify frontend to play exit sound
+      this._emit('trade:exit-sound', {});
 
       const currentPrice = exitResult.currentPrice;
       const pnlPercent = exitResult.leveragedPnlPercent;
