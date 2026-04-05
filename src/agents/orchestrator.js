@@ -13,14 +13,12 @@ const pool = require('../db/pool');
 /**
  * Orchestrator — coordinates all agents in a 60-second workflow loop.
  *
- * Agents:
- * 1. ConditionOneAgent   — evaluates user's condition 1 (1-10 long/short)
- * 2. ConditionTwoAgent   — evaluates user's condition 2 (1-10 long/short)
- * 3. ConditionThreeAgent — evaluates user's condition 3 (1-10 long/short)
- * 4. EntryDecisionAgent  — averages scores, decides entry (spread > 2, avg > 6)
- * 5. ExitAgent           — monitors open trade, exits per user's exit strategy
- * 6. LearnAgent          — analyzes trade history, refines strategy over time
- * 7. DataAgent           — tracks stats, logs trades to DB/CSV
+ * Fully automated: bot places and closes trades without user confirmation.
+ * Uses 50% of USDT-M futures balance as margin per trade at 100x leverage.
+ *
+ * Rule: Entry agents and Exit agent never run at the same time.
+ *   - No open position → run entry agents (condition 1/2/3 + entry decision)
+ *   - Open position    → run exit agent only
  */
 class Orchestrator {
   constructor(io) {
@@ -35,15 +33,14 @@ class Orchestrator {
     this.dataAgent = new DataAgent();
 
     this.activeStrategy = null;
-    this.conditions = [];     // User's 3 condition descriptions
-    this.exitStrategy = '';   // User's exit strategy text
+    this.conditions = [];
+    this.exitStrategy = '';
     this.sessionTimer = null;
     this.workflowInterval = null;
     this.running = false;
     this.lastCycleResults = {};
     this.consecutiveLosses = 0;
     this.maxConsecutiveLosses = 3;
-    this.pendingSignal = null;
     this.currentTrade = null;
     this.tradeLog = [];
     this.workflowHistory = [];
@@ -59,7 +56,6 @@ class Orchestrator {
 
     this.activeStrategy = stratResult.rows[0];
     this.consecutiveLosses = 0;
-    this.pendingSignal = null;
     this.currentTrade = null;
     this.tradeLog = [];
     this.workflowHistory = [];
@@ -91,8 +87,8 @@ class Orchestrator {
 
     this.running = true;
     this._emit('session:update', { status: 'started', strategyId, sessionId: session.rows[0].id });
-    this._emitWorkflow('system', 'Bot started',
-      `Strategy: ${this.activeStrategy.name} | ${this.conditions.filter(Boolean).length} conditions | Looking for entry signals...`);
+    this._emitWorkflow('system', 'Bot started (AUTO-TRADE)',
+      `Strategy: ${this.activeStrategy.name} | ${this.conditions.filter(Boolean).length} conditions | Fully automated — trades will be placed automatically`);
 
     this.workflowInterval = setInterval(() => this._runWorkflow(), 60000);
     this._runWorkflow();
@@ -121,24 +117,8 @@ class Orchestrator {
     this._emitWorkflow('system', 'Bot stopped', reason);
     this._emit('session:update', { status: 'stopped', strategyId: this.activeStrategy?.id, reason });
     this.activeStrategy = null;
-    this.pendingSignal = null;
 
     return { status: 'stopped', reason };
-  }
-
-  async handleSignalResponse(accepted) {
-    if (!this.pendingSignal) return { error: 'No pending signal' };
-
-    if (accepted) {
-      await this._openTrade(this.pendingSignal);
-      this._emitWorkflow('trade', 'Trade opened',
-        `${this.pendingSignal.side.toUpperCase()} at $${this.pendingSignal.entryPrice.toLocaleString()} | 100x Leverage | Watching for exit...`);
-    } else {
-      this._emitWorkflow('system', 'Signal rejected', 'User declined the trade. Continuing to scan...');
-    }
-
-    this.pendingSignal = null;
-    return { status: accepted ? 'trade_opened' : 'signal_rejected' };
   }
 
   async _runWorkflow() {
@@ -176,13 +156,12 @@ class Orchestrator {
       const hasOpenTrade = openTrades.rows.length > 0;
       const results = {};
 
-      // ===== EXIT MODE =====
+      // ===== EXIT MODE (only exit agent runs — entry agents are OFF) =====
       if (hasOpenTrade) {
         const openTrade = openTrades.rows[0];
         // Track current trade for status reporting
         if (!this.currentTrade) {
           this.currentTrade = openTrade;
-          // Emit entry line for existing open trade on session resume
           this._emit('chart:entry-line', {
             price: parseFloat(openTrade.entry_price),
             side: openTrade.side,
@@ -215,8 +194,8 @@ class Orchestrator {
         }
       }
 
-      // ===== ENTRY MODE =====
-      if (!hasOpenTrade && !this.pendingSignal) {
+      // ===== ENTRY MODE (only entry agents run — exit agent is OFF) =====
+      if (!hasOpenTrade) {
         // Run 3 condition agents in parallel
         const [c1, c2, c3] = await Promise.all([
           this.conditionOne.analyze(candles15m, candles1h, candles4h, this.conditions[0] || ''),
@@ -262,26 +241,29 @@ class Orchestrator {
         }});
 
         if (results.entryDecision.decision !== 'no_trade') {
-          this._emitWorkflow('signal', 'ENTRY SIGNAL',
+          this._emitWorkflow('signal', 'ENTRY SIGNAL — AUTO-TRADING',
             `${results.entryDecision.side === 'buy' ? 'LONG' : 'SHORT'} 100X | Avg Long: ${results.entryDecision.avgLongScore}/10 | Avg Short: ${results.entryDecision.avgShortScore}/10 | Spread: ${results.entryDecision.spread}`);
 
-          this.pendingSignal = {
+          // Automatically place the trade — no user confirmation needed
+          const signal = {
             ...results.entryDecision,
             entryPrice: currentPrice,
             timestamp: Date.now(),
             agentResults: results.entryDecision.agentScores,
           };
 
-          this._emit('signal:prompt', {
-            side: results.entryDecision.side,
-            confidence: results.entryDecision.confidence,
+          await this._openTrade(signal);
+          this._emitWorkflow('trade', 'Trade opened automatically',
+            `${signal.side.toUpperCase()} at $${signal.entryPrice.toLocaleString()} | 100x Leverage | 50% portfolio margin | Watching for exit...`);
+
+          // Notify frontend of auto-trade (sound + notification, no modal)
+          this._emit('trade:auto-opened', {
+            side: signal.side,
             entryPrice: currentPrice,
             avgLongScore: results.entryDecision.avgLongScore,
             avgShortScore: results.entryDecision.avgShortScore,
             spread: results.entryDecision.spread,
-            agentScores: results.entryDecision.agentScores,
-            reason: results.entryDecision.reason,
-            message: 'Do you want to place this trade for 100X Leverage?',
+            confidence: results.entryDecision.confidence,
           });
         } else {
           this._emitWorkflow('scan', 'No signal',
@@ -319,22 +301,54 @@ class Orchestrator {
         this._emitWorkflow('error', 'Leverage warning', `Could not set leverage: ${levErr.message}. Proceeding with current leverage.`);
       }
 
+      // Get account balance and calculate 50% margin position size
+      let positionSize;
+      try {
+        const balanceResult = await exchangeService.getAccountBalance();
+        // BloFin balance response: { data: [{ currency: "USDT", available: "..." }] }
+        const usdtBalance = balanceResult?.data?.find(b => b.currency === 'USDT' || b.ccy === 'USDT');
+        const availableBalance = parseFloat(usdtBalance?.available || usdtBalance?.availBal || '0');
+
+        if (availableBalance <= 0) {
+          this._emitWorkflow('error', 'Trade failed', 'No available USDT balance in futures account');
+          return;
+        }
+
+        // 50% of available balance as margin
+        const marginUsdt = availableBalance * 0.5;
+        // With 100x leverage, notional = margin * 100
+        const notionalUsdt = marginUsdt * 100;
+        // Convert to BTC size
+        positionSize = Math.floor((notionalUsdt / signal.entryPrice) * 10000) / 10000; // 4 decimal places
+
+        // BloFin minimum order size for BTC-USDT is 0.01
+        if (positionSize < 0.01) positionSize = 0.01;
+
+        this._emitWorkflow('trade', 'Position sized',
+          `Balance: $${availableBalance.toFixed(2)} | 50% margin: $${marginUsdt.toFixed(2)} | Size: ${positionSize} BTC`);
+      } catch (balErr) {
+        console.error('Balance fetch error:', balErr.message);
+        this._emitWorkflow('error', 'Balance error', `Could not fetch balance: ${balErr.message}. Using minimum size.`);
+        positionSize = 0.01;
+      }
+
       // Place the actual market order on BloFin
       const orderResult = await exchangeService.placeOrder({
         instId,
         side: signal.side, // 'buy' for long, 'sell' for short
-        size: '0.01', // Minimum BTC size for perpetual futures
+        size: String(positionSize),
         orderType: 'market',
       });
 
+      const orderId = orderResult?.data?.[0]?.ordId || orderResult?.data?.ordId || 'confirmed';
       this._emitWorkflow('trade', 'Order placed on BloFin',
-        `${signal.side.toUpperCase()} market order executed | Order ID: ${orderResult?.data?.[0]?.ordId || 'confirmed'}`);
+        `${signal.side.toUpperCase()} ${positionSize} BTC market order | Order ID: ${orderId}`);
 
       // Log trade to database
       const trade = await this.dataAgent.logTrade(this.activeStrategy.id, {
         side: signal.side,
         entry_price: signal.entryPrice,
-        position_size: 0.01,
+        position_size: positionSize,
         leverage: 100,
         entry_time: new Date(),
         result: 'open',
@@ -512,16 +526,6 @@ class Orchestrator {
       conditions: this.conditions,
       exitStrategy: this.exitStrategy,
       consecutiveLosses: this.consecutiveLosses,
-      pendingSignal: this.pendingSignal ? {
-        side: this.pendingSignal.side,
-        confidence: this.pendingSignal.confidence,
-        entryPrice: this.pendingSignal.entryPrice,
-        agentScores: this.pendingSignal.agentResults,
-        avgLongScore: this.pendingSignal.avgLongScore,
-        avgShortScore: this.pendingSignal.avgShortScore,
-        spread: this.pendingSignal.spread,
-      } : null,
-      hasPendingSignal: !!this.pendingSignal,
       currentTrade: this.currentTrade ? {
         side: this.currentTrade.side,
         entry_price: parseFloat(this.currentTrade.entry_price),

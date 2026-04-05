@@ -35,17 +35,6 @@ function createSessionRoutes(orchestrator) {
     }
   });
 
-  // Handle user response to trade signal prompt
-  router.post('/signal/respond', async (req, res) => {
-    try {
-      const { accepted } = req.body;
-      const result = await orchestrator.handleSignalResponse(accepted);
-      res.json(result);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   return router;
 }
 

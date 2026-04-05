@@ -44,13 +44,6 @@ const els = {
   tradeCount: document.getElementById('tradeCount'),
   workflowFeed: document.getElementById('workflowFeed'),
   workflowCount: document.getElementById('workflowCount'),
-  signalOverlay: document.getElementById('signalOverlay'),
-  signalSide: document.getElementById('signalSide'),
-  signalPrice: document.getElementById('signalPrice'),
-  signalConfidence: document.getElementById('signalConfidence'),
-  signalScores: document.getElementById('signalScores'),
-  btnAcceptSignal: document.getElementById('btnAcceptSignal'),
-  btnRejectSignal: document.getElementById('btnRejectSignal'),
   exchangeState: document.getElementById('exchangeState'),
   botStatus: document.getElementById('botStatus'),
   loss1: document.getElementById('loss1'),
@@ -187,12 +180,15 @@ socket.on('session:update', (d) => {
   } else {
     sessionRunning = false; els.sessionStatus.textContent = d.reason || 'Stopped';
     els.sessionStatus.style.color = 'var(--text-dim)'; setBotIndicator(false);
-    els.signalOverlay.style.display = 'none';
   }
   updateSessionButtons();
 });
 socket.on('workflow:update', (d) => addWorkflowEntry(d));
-socket.on('signal:prompt', (d) => { playCashRegister(); showSignalPrompt(d); });
+// Auto-trade notification — play sound when bot places a trade automatically
+socket.on('trade:auto-opened', (d) => {
+  playCashRegister();
+  loadPerformance();
+});
 
 // ---------- UI Helpers ----------
 function updateConnectionStatus(connected) {
@@ -224,33 +220,6 @@ function addWorkflowEntry(d) {
   els.workflowFeed.appendChild(entry);
   els.workflowFeed.scrollTop = els.workflowFeed.scrollHeight;
 }
-
-// Signal prompt
-function showSignalPrompt(d) {
-  els.signalOverlay.style.display = 'flex';
-  els.signalSide.textContent = d.side === 'buy' ? 'LONG' : 'SHORT';
-  els.signalSide.className = `signal-side ${d.side}`;
-  els.signalPrice.textContent = `$${parseFloat(d.entryPrice).toLocaleString('en-US', { minimumFractionDigits: 2 })}`;
-  els.signalConfidence.textContent = `${(d.confidence * 100).toFixed(0)}%`;
-  if (d.agentScores) {
-    const labels = { condition_1: 'Agent 1', condition_2: 'Agent 2', condition_3: 'Agent 3' };
-    els.signalScores.innerHTML = Object.entries(d.agentScores).map(([n, s]) => `
-      <div class="score-row"><span class="score-agent">${labels[n] || n}</span>
-      <span class="score-values"><span class="score-long">${s.longScore}/10 Long</span><span class="score-short">${s.shortScore}/10 Short</span></span></div>
-    `).join('') + `<div class="score-row" style="border-top:1px solid var(--border);padding-top:4px;margin-top:4px;">
-      <span class="score-agent" style="color:var(--text-primary);">Average</span>
-      <span class="score-values"><span class="score-long">${d.avgLongScore}/10 Long</span><span class="score-short">${d.avgShortScore}/10 Short</span></span></div>
-      <div class="score-row"><span class="score-agent">Spread</span><span class="score-values" style="color:var(--warning)">${d.spread}</span></div>`;
-  }
-}
-els.btnAcceptSignal.addEventListener('click', async () => {
-  els.signalOverlay.style.display = 'none';
-  await api('/api/session/signal/respond', { method: 'POST', body: JSON.stringify({ accepted: true }) });
-});
-els.btnRejectSignal.addEventListener('click', async () => {
-  els.signalOverlay.style.display = 'none';
-  await api('/api/session/signal/respond', { method: 'POST', body: JSON.stringify({ accepted: false }) });
-});
 
 function updateLossDots(count) {
   [els.loss1, els.loss2, els.loss3].forEach((dot, i) => { dot.className = `loss-dot ${i < count ? 'hit' : ''}`; });
@@ -477,7 +446,6 @@ async function checkSessionStatus() {
       if (status.workflowHistory?.length > 0) { clearWorkflow(); status.workflowHistory.forEach(e => addWorkflowEntry(e)); }
     }
     if (status.consecutiveLosses !== undefined) updateLossDots(status.consecutiveLosses);
-    if (status.hasPendingSignal && status.pendingSignal) showSignalPrompt(status.pendingSignal);
     // Restore entry price line if there's an open trade
     if (status.currentTrade && candleSeries) {
       if (entryPriceLine) {
