@@ -1,5 +1,5 @@
 const indicatorService = require('../services/indicatorService');
-const novaService = require('../services/novaService');
+const groqService = require('../services/groqService');
 
 /**
  * ConditionEvaluator — shared scoring engine for all condition agents.
@@ -521,7 +521,7 @@ RESPOND WITH ONLY THIS JSON (no markdown, no explanation outside JSON):
 {"longScore": X, "shortScore": Y, "summary": "one sentence"}`;
 
     try {
-      const result = await novaService.analyze(prompt);
+      const result = await groqService.analyze(prompt);
 
       // Validate AI actually returned usable scores
       if (typeof result.longScore !== 'number' || typeof result.shortScore !== 'number' ||

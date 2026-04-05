@@ -173,6 +173,32 @@
     </div>
   </div>
 
+  <!-- Strategy View Modal -->
+  <div class="modal-overlay" id="strategyViewModal" style="display: none;">
+    <div class="modal-card strategy-view-modal">
+      <div class="modal-header">STRATEGY DETAILS</div>
+      <div class="modal-body">
+        <div class="view-strategy-name" id="viewStrategyName">--</div>
+        <div class="view-pnl-row">
+          <span class="view-pnl-label">Total PnL:</span>
+          <span class="view-pnl" id="viewPnl">0.00%</span>
+        </div>
+
+        <div class="modal-divider"></div>
+        <div class="modal-section-title">Conditions</div>
+        <div id="viewConditions"></div>
+
+        <div class="modal-divider"></div>
+        <div class="modal-section-title">Exit Strategy</div>
+        <div class="view-exit-strategy" id="viewExitStrategy">--</div>
+
+        <div class="modal-actions">
+          <button class="btn-action" onclick="document.getElementById('strategyViewModal').style.display='none'" style="width: 100%;">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Signal Modal Overlay -->
   <div class="modal-overlay" id="signalOverlay" style="display: none;">
     <div class="modal-card signal-modal">

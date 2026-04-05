@@ -1,5 +1,5 @@
 const pool = require('../db/pool');
-const novaService = require('../services/novaService');
+const groqService = require('../services/groqService');
 
 /**
  * Learn Agent — analyzes past trade performance and refines the user's
@@ -156,7 +156,7 @@ Based on the performance data, provide:
 Respond ONLY with valid JSON: {"insight": "...", "suggestion": "..."}`;
 
     try {
-      const result = await novaService.analyze(prompt);
+      const result = await groqService.analyze(prompt);
       return {
         insight: result.insight || 'Trade performance is being tracked.',
         suggestion: result.suggestion || null,

@@ -280,6 +280,11 @@ main {
   color: var(--danger);
 }
 
+.btn-sm.btn-view:hover {
+  border-color: var(--success);
+  color: var(--success);
+}
+
 /* Bot Controls */
 .bot-status {
   display: flex;
@@ -1227,6 +1232,69 @@ main {
 
 .nav-link {
   transition: all 0.2s ease;
+}
+
+/* Strategy View Modal */
+.strategy-view-modal {
+  width: 480px;
+}
+
+.view-strategy-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.view-pnl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.view-pnl-label {
+  color: var(--text-secondary);
+}
+
+.view-pnl {
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.view-condition {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.view-cond-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.view-cond-text {
+  display: block;
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.view-exit-strategy {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
 }
 
 /* Responsive */

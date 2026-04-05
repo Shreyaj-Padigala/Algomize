@@ -7,6 +7,7 @@ const ExitAgent = require('./exitAgent');
 const LearnAgent = require('./learnAgent');
 const DataAgent = require('./dataAgent');
 const marketService = require('../services/marketService');
+const exchangeService = require('../services/exchangeService');
 const pool = require('../db/pool');
 
 /**
@@ -178,6 +179,15 @@ class Orchestrator {
       // ===== EXIT MODE =====
       if (hasOpenTrade) {
         const openTrade = openTrades.rows[0];
+        // Track current trade for status reporting
+        if (!this.currentTrade) {
+          this.currentTrade = openTrade;
+          // Emit entry line for existing open trade on session resume
+          this._emit('chart:entry-line', {
+            price: parseFloat(openTrade.entry_price),
+            side: openTrade.side,
+          });
+        }
 
         results.exit = await this.exitAgent.analyze({
           openTrade,
@@ -298,10 +308,33 @@ class Orchestrator {
 
   async _openTrade(signal) {
     try {
+      const instId = 'BTC-USDT';
+
+      // Set leverage to 100x before placing the trade
+      try {
+        await exchangeService.setLeverage(instId, 100);
+        this._emitWorkflow('trade', 'Leverage set', '100x leverage configured on BloFin');
+      } catch (levErr) {
+        console.error('Set leverage error:', levErr.message);
+        this._emitWorkflow('error', 'Leverage warning', `Could not set leverage: ${levErr.message}. Proceeding with current leverage.`);
+      }
+
+      // Place the actual market order on BloFin
+      const orderResult = await exchangeService.placeOrder({
+        instId,
+        side: signal.side, // 'buy' for long, 'sell' for short
+        size: '0.01', // Minimum BTC size for perpetual futures
+        orderType: 'market',
+      });
+
+      this._emitWorkflow('trade', 'Order placed on BloFin',
+        `${signal.side.toUpperCase()} market order executed | Order ID: ${orderResult?.data?.[0]?.ordId || 'confirmed'}`);
+
+      // Log trade to database
       const trade = await this.dataAgent.logTrade(this.activeStrategy.id, {
         side: signal.side,
         entry_price: signal.entryPrice,
-        position_size: 1,
+        position_size: 0.01,
         leverage: 100,
         entry_time: new Date(),
         result: 'open',
@@ -309,14 +342,31 @@ class Orchestrator {
       });
       this.currentTrade = trade;
       this._emit('trade:update', { action: 'opened', trade });
+      this._emit('chart:entry-line', {
+        price: signal.entryPrice,
+        side: signal.side,
+      });
     } catch (err) {
       console.error('Trade open error:', err);
-      this._emitWorkflow('error', 'Trade open failed', err.message);
+      this._emitWorkflow('error', 'Trade open failed', `BloFin order failed: ${err.message}`);
     }
   }
 
   async _closeTrade(openTrade, exitResult) {
     try {
+      // Close the actual position on BloFin
+      const instId = 'BTC-USDT';
+      try {
+        await exchangeService.closePosition(instId);
+        this._emitWorkflow('trade', 'Position closed on BloFin', 'Exchange position closed successfully');
+      } catch (closeErr) {
+        console.error('BloFin close position error:', closeErr.message);
+        this._emitWorkflow('error', 'Exchange close warning', `Could not close on exchange: ${closeErr.message}`);
+      }
+
+      // Remove entry price line from chart
+      this._emit('chart:remove-entry-line', {});
+
       const currentPrice = exitResult.currentPrice;
       const pnlPercent = exitResult.leveragedPnlPercent;
       const result = pnlPercent >= 0 ? 'win' : 'loss';
@@ -472,6 +522,10 @@ class Orchestrator {
         spread: this.pendingSignal.spread,
       } : null,
       hasPendingSignal: !!this.pendingSignal,
+      currentTrade: this.currentTrade ? {
+        side: this.currentTrade.side,
+        entry_price: parseFloat(this.currentTrade.entry_price),
+      } : null,
       workflowHistory: this.workflowHistory,
     };
   }

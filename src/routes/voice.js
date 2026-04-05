@@ -1,7 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const config = require('../config');
-const novaService = require('../services/novaService');
+const groqService = require('../services/groqService');
 
 function createVoiceRoutes(orchestrator) {
   const router = express.Router();
@@ -25,7 +25,7 @@ function createVoiceRoutes(orchestrator) {
         agentResults.microTrend?.currentPrice || 'unknown';
 
       // Generate text summary via Nova
-      const summaryText = await novaService.generateVoiceSummary(agentResults, currentPrice);
+      const summaryText = await groqService.generateVoiceSummary(agentResults, currentPrice);
 
       // If no ElevenLabs key, return text only
       if (!config.elevenlabs.apiKey) {

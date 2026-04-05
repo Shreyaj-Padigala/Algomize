@@ -25,6 +25,7 @@ let sessionRunning = false;
 let workflowCount = 0;
 let priceChart = null;
 let candleSeries = null;
+let entryPriceLine = null;
 
 // DOM
 const els = {
@@ -118,12 +119,19 @@ function initCharts() {
   }).observe(priceContainer);
 }
 
+// Candle data cache keyed by timestamp for dedup/merge
+let candleDataMap = {};
+
 function updateCharts(candles15m) {
   if (!candleSeries || !candles15m || candles15m.length === 0) return;
-  const data = candles15m.map(c => ({
-    time: Math.floor(c.timestamp / 1000), open: parseFloat(c.open),
-    high: parseFloat(c.high), low: parseFloat(c.low), close: parseFloat(c.close),
-  })).sort((a, b) => a.time - b.time);
+  candles15m.forEach(c => {
+    const time = Math.floor(c.timestamp / 1000);
+    candleDataMap[time] = {
+      time, open: parseFloat(c.open),
+      high: parseFloat(c.high), low: parseFloat(c.low), close: parseFloat(c.close),
+    };
+  });
+  const data = Object.values(candleDataMap).sort((a, b) => a.time - b.time);
   candleSeries.setData(data);
   els.chartUpdateTime.textContent = new Date().toLocaleTimeString();
 }
@@ -138,8 +146,35 @@ socket.on('chart:data', (d) => { if (d.candles15m) updateCharts(d.candles15m); }
 socket.on('chart:update', (d) => {
   if (!candleSeries || !d.candle || d.timeframe !== '15m') return;
   const c = d.candle;
-  candleSeries.update({ time: Math.floor(c.timestamp / 1000), open: parseFloat(c.open), high: parseFloat(c.high), low: parseFloat(c.low), close: parseFloat(c.close) });
+  const time = Math.floor(c.timestamp / 1000);
+  const candle = { time, open: parseFloat(c.open), high: parseFloat(c.high), low: parseFloat(c.low), close: parseFloat(c.close) };
+  candleDataMap[time] = candle;
+  candleSeries.update(candle);
   els.chartUpdateTime.textContent = new Date().toLocaleTimeString();
+});
+socket.on('chart:entry-line', (d) => {
+  if (!candleSeries) return;
+  // Remove existing entry line if any
+  if (entryPriceLine) {
+    try { candleSeries.removePriceLine(entryPriceLine); } catch {}
+    entryPriceLine = null;
+  }
+  // Add dashed horizontal line: green for long (buy), red for short (sell)
+  const isLong = d.side === 'buy';
+  entryPriceLine = candleSeries.createPriceLine({
+    price: d.price,
+    color: isLong ? '#00d2ff' : '#e94560',
+    lineWidth: 1,
+    lineStyle: LightweightCharts.LineStyle.Dashed,
+    axisLabelVisible: true,
+    title: isLong ? 'LONG Entry' : 'SHORT Entry',
+  });
+});
+socket.on('chart:remove-entry-line', () => {
+  if (candleSeries && entryPriceLine) {
+    try { candleSeries.removePriceLine(entryPriceLine); } catch {}
+    entryPriceLine = null;
+  }
 });
 socket.on('agent:update', () => loadAgentStatuses());
 socket.on('trade:update', () => loadPerformance());
@@ -306,10 +341,49 @@ function renderStrategies() {
       <div><span class="name">${s.name}</span>
         <div class="meta">PnL: ${parseFloat(s.pnl_total || 0).toFixed(2)}% | ${condCount} conditions</div>
       </div>
-      <div class="actions"><button class="btn-sm" onclick="event.stopPropagation(); deleteStrategy(${s.id})">del</button></div>
+      <div class="actions">
+        <button class="btn-sm btn-view" onclick="event.stopPropagation(); viewStrategy(${s.id})" title="View conditions">view</button>
+        <button class="btn-sm" onclick="event.stopPropagation(); deleteStrategy(${s.id})">del</button>
+      </div>
     </div>`;
   }).join('');
 }
+
+function viewStrategy(id) {
+  const strat = strategies.find(s => s.id === id);
+  if (!strat) return;
+
+  let conditions = [];
+  try {
+    let c = strat.conditions;
+    if (typeof c === 'string') c = JSON.parse(c);
+    if (Array.isArray(c)) conditions = c.map(x => typeof x === 'string' ? x : x.description || '');
+  } catch {}
+
+  let exitStrategy = '';
+  try {
+    let r = strat.rules;
+    if (typeof r === 'string') r = JSON.parse(r);
+    if (r && r.exitStrategy) exitStrategy = r.exitStrategy;
+  } catch {}
+
+  const modal = document.getElementById('strategyViewModal');
+  document.getElementById('viewStrategyName').textContent = strat.name;
+  document.getElementById('viewPnl').textContent = `${parseFloat(strat.pnl_total || 0).toFixed(2)}%`;
+  document.getElementById('viewPnl').className = `view-pnl ${parseFloat(strat.pnl_total || 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}`;
+
+  const condList = document.getElementById('viewConditions');
+  condList.innerHTML = conditions.map((c, i) => c ? `
+    <div class="view-condition">
+      <span class="view-cond-label">Condition ${i + 1}</span>
+      <span class="view-cond-text">${c}</span>
+    </div>` : '').join('') || '<div style="color:var(--text-dim)">No conditions set</div>';
+
+  document.getElementById('viewExitStrategy').textContent = exitStrategy || 'Exit at 50% profit or 20% loss (default)';
+
+  modal.style.display = 'flex';
+}
+window.viewStrategy = viewStrategy;
 
 function selectStrategy(id) {
   selectedStrategyId = id;
@@ -404,6 +478,21 @@ async function checkSessionStatus() {
     }
     if (status.consecutiveLosses !== undefined) updateLossDots(status.consecutiveLosses);
     if (status.hasPendingSignal && status.pendingSignal) showSignalPrompt(status.pendingSignal);
+    // Restore entry price line if there's an open trade
+    if (status.currentTrade && candleSeries) {
+      if (entryPriceLine) {
+        try { candleSeries.removePriceLine(entryPriceLine); } catch {}
+      }
+      const isLong = status.currentTrade.side === 'buy';
+      entryPriceLine = candleSeries.createPriceLine({
+        price: status.currentTrade.entry_price,
+        color: isLong ? '#00d2ff' : '#e94560',
+        lineWidth: 1,
+        lineStyle: LightweightCharts.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: isLong ? 'LONG Entry' : 'SHORT Entry',
+      });
+    }
     updateSessionButtons();
   } catch {}
 }
@@ -453,7 +542,8 @@ async function init() {
   setInterval(loadPerformance, 30000);
   setInterval(loadDashboardSummary, 30000);
   setInterval(checkExchange, 60000);
-  setInterval(loadInitialChartData, 60000);
+  // Only refresh full chart data every 5 min to fill gaps; WebSocket handles real-time
+  setInterval(loadInitialChartData, 300000);
 }
 
 init();

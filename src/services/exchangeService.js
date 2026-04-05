@@ -112,7 +112,9 @@ class ExchangeService {
     return this.request('POST', '/api/v1/trade/order', orderData);
   }
 
-  async closePosition(instId = 'BTC-USDT') {
+  async closePosition(instId = 'BTC-USDT', side) {
+    // To close a position, place an opposite-side market order
+    // Or use the close-position endpoint
     return this.request('POST', '/api/v1/trade/close-position', {
       instId,
       tdMode: 'cross',
@@ -130,6 +132,7 @@ class ExchangeService {
       mgnMode: 'cross',
     });
   }
+
 }
 
 module.exports = new ExchangeService();

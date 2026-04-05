@@ -25,10 +25,9 @@ module.exports = {
     wsUrl: process.env.BLOFIN_WS_URL || 'wss://openapi.blofin.com/ws/public',
   },
 
-  aws: {
-    region: process.env.AWS_REGION || 'us-east-1',
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+  groq: {
+    apiKey: process.env.GROQ_API_KEY || '',
+    model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
   },
 
   elevenlabs: {
