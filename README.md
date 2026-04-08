@@ -32,9 +32,6 @@ BLOFIN_PASSPHRASE=******
 BLOFIN_BASE_URL=https://openapi.blofin.com
 BLOFIN_WS_URL=wss://openapi.blofin.com/ws/public
 
-# ----- Groq AI -----
-GROQ_API_KEY=*********
-
 # ----- Trading Configuration -----
 TRADING_SYMBOL=BTC-USDT
 MAX_PORTFOLIO_PERCENT=50
